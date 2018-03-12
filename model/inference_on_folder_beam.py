@@ -102,7 +102,6 @@ def extract_features(image_dir):
         final_array = np.array(final_array)
     return final_array, all_image_names
 
-
 def run_inference(sess, features, generator, keep_prob):
 
     batch_size = features.shape[0]
@@ -126,10 +125,12 @@ def main(_):
         for k, v in dict_data.items():
             data[k] = v
     data['idx_to_word'] = {int(k):v for k, v in data['idx_to_word'].items()}
+    print("Loaded dictionary...")
 
     # extract all features 
     features, all_image_names = extract_features(FLAGS.test_dir)
-    
+    print("Features extracted...")
+
     # Build the TensorFlow graph and train it
     g = tf.Graph()
     with g.as_default():
@@ -169,7 +170,10 @@ def main(_):
                 this_image_name = all_image_names['file_name'].values[j]
                 img_name = os.path.join(FLAGS.results_dir, this_image_name)
                 img = imread(os.path.join(FLAGS.test_dir, this_image_name))
-                write_text_on_image(img, img_name, captions_deco[j])
+                print(img_name)
+                print(captions_deco[j])
+                print()
+                #write_text_on_image(img, img_name, captions_deco[j])
     print("\ndone.")
                
 if __name__ == '__main__':

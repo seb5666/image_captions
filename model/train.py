@@ -228,7 +228,7 @@ if __name__ == '__main__':
       '--print_every',
       type=int,
       default=50,
-      help='Num of steps to print your training loss. 0 for not printing/'
+      help='Num of steps to print your training loss. 1 for not printing/'
   )
   parser.add_argument(
       '--sample_every',
