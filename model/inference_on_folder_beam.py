@@ -86,7 +86,7 @@ def extract_features(image_dir):
         counter = 0
         print("There are total " + str(len(os.listdir(image_dir))) + " images to process.")
         all_image_names = os.listdir(image_dir)
-        all_image_names = pd.DataFrame({'file_name':all_image_names})
+        all_image_names = pd.DataFrame({'file_name': all_image_names})
         
         for img in all_image_names['file_name'].values:
                 
@@ -115,6 +115,11 @@ def run_inference(sess, features, generator, keep_prob):
         final_preds.append(np.array(pred))
         
     return final_preds
+
+def extract_image_id(image_name):
+    name, extension = image_name.split(".")
+    assert(extension == "jpg")
+    return int(name.split("_")[-1])
 
 def main(_):
     
@@ -145,6 +150,9 @@ def main(_):
         
         # run training 
         init = tf.global_variables_initializer()
+
+        annotations = []
+
         with tf.Session() as sess:
         
             sess.run(init)
@@ -156,7 +164,7 @@ def main(_):
             # predictions 
             final_preds = run_inference(sess, features, generator, 1.0)
             captions_pred = [unpack.reshape(-1, 1) for unpack in final_preds]
-            #captions_pred = np.concatenate(captions_pred, 1)
+            # captions_pred = np.concatenate(captions_pred, 1)
             captions_deco= []
             for cap in captions_pred:
                 dec = decode_captions(cap.reshape(-1, 1), data['idx_to_word'])
@@ -170,10 +178,17 @@ def main(_):
                 this_image_name = all_image_names['file_name'].values[j]
                 img_name = os.path.join(FLAGS.results_dir, this_image_name)
                 img = imread(os.path.join(FLAGS.test_dir, this_image_name))
-                print(img_name)
-                print(captions_deco[j])
-                print()
-                #write_text_on_image(img, img_name, captions_deco[j])
+                write_text_on_image(img, img_name, captions_deco[j])
+
+                annotation = {
+                    'image_id': extract_image_id(this_image_name),
+                    'caption': captions_deco[j]
+                }
+                annotations.append(annotation)
+
+        with open(FLAGS.save_json_file, 'w') as outfile:
+            json.dump(annotations, outfile)
+
     print("\ndone.")
                
 if __name__ == '__main__':
@@ -218,6 +233,14 @@ if __name__ == '__main__':
       Path to dictionary file\
       """
   )
+
+  parser.add_argument(
+      '--save_json_file',
+      type=str,
+      default="./annotations.json",
+      help="Store the resulting annotiations in a json file"
+  )
+
   FLAGS, unparsed = parser.parse_known_args()
   tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
 
