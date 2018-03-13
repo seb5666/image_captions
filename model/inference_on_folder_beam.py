@@ -233,7 +233,6 @@ if __name__ == '__main__':
       Path to dictionary file\
       """
   )
-
   parser.add_argument(
       '--save_json_file',
       type=str,

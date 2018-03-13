@@ -85,7 +85,6 @@ def deprocess_image(img, mean_img, mean='image', renorm=False):
     img = 255.0 * (img - low) / (high - low)
   return img.astype(np.uint8)
 
-
 def image_from_url(url):
   """
   Read an image from a URL. Returns a numpy array with the pixel data.
