@@ -51,24 +51,15 @@ def load_coco_data(base_dir='/home/ubuntu/COCO/dataset/COCO_captioning/',
 
 
 def decode_captions(captions, idx_to_word):
-  singleton = False
-  if captions.ndim == 1:
-    singleton = True
-    captions = captions[None]
-  decoded = []
-  N, T = captions.shape
-  for i in range(N):
-    words = []
-    for t in range(T):
-      word = idx_to_word[captions[i, t]]
-      if word != '<NULL>':
-        words.append(word)
-      if word == '<END>':
-        break
-    decoded.append(' '.join(words))
-  if singleton:
-    decoded = decoded[0]
-  return decoded
+  stop_words = ['<NULL>', '<START>', '<END>']
+  words = []
+  for id in captions:
+    word = idx_to_word[id]
+    if word not in stop_words:
+      words.append(word)
+    if word == "<END>":
+      break
+  return words
 
 
 def sample_coco_minibatch(data, batch_size=100, split='train'):

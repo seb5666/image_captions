@@ -66,7 +66,8 @@ def run_inference(sess, features, generator, data, num_winners=1, voting_scheme=
     beam_preds = []
 
     for i in range(len(features)):
-        print("Image {}/{}".format(i, len(features)))
+        if i % 1000 == 0:
+            print("Image {}/{}".format(i, len(features)))
         feature = features[i].reshape(1, -1)
 
         preds = generator.beam_search(sess, feature)
@@ -101,7 +102,7 @@ def main(_):
     # Parameters
     voting_scheme = "reweighted"
     num_winners = 4
-    beam_size = 1000
+    beam_size = 10
 
     inference_batch_size = 1
 
@@ -154,41 +155,38 @@ def main(_):
             beam_preds, vote_preds = run_inference(sess, features, generator, data, voting_scheme=voting_scheme, num_winners=num_winners)
             # beam_preds, vote_preds = run_inference2(sess, features, generator, data, inference_batch_size)
             # exit()
-            captions_deco = []
-
-            for beam_caption, voted_captions in zip(beam_preds, vote_preds):
-
-                beam_dec = decode_captions(beam_preds[-1].reshape(-1, 1), data['idx_to_word'])
-                beam_dec = ' '.join(beam_dec)
-                print("Beam caption:")
-                print(beam_dec)
-
-                print("Voted captions:")
-                voted_dec = []
-                for voted_caption in voted_captions:
-                    print(voted_caption)
-                    vote_dec = decode_captions(voted_caption.reshape(-1, 1), data['idx_to_word'])
-                    vote_dec = ' '.join(vote_dec)
-                    voted_dec.append(vote_dec)
-                    print(vote_dec)
-
-                captions_deco.append(beam_dec + '\n' + '\n'.join(voted_dec))
-
 
             # saved the images with captions written on them
             if not os.path.exists(FLAGS.results_dir):
                 os.makedirs(FLAGS.results_dir)
-            for j in range(len(captions_deco)):
-                this_image_name = all_image_names['file_name'].values[j]
-                img_name = os.path.join(FLAGS.results_dir, this_image_name)
-                img = imread(os.path.join(FLAGS.test_dir, this_image_name))
-                write_text_on_image(img, img_name, captions_deco[j])
+
+            for i, (beam_caption, voted_captions) in enumerate(zip(beam_preds, vote_preds)):
+
+                beam_dec = decode_captions(beam_caption, data['idx_to_word'])
+                beam_dec = ' '.join(beam_dec)
+
+                voted_dec = []
+                for voted_caption in voted_captions:
+                    vote_dec = decode_captions(voted_caption, data['idx_to_word'])
+                    vote_dec = ' '.join(vote_dec)
+                    voted_dec.append(vote_dec)
+
+                image_name = all_image_names['file_name'].values[i]
 
                 annotation = {
-                    'image_id': extract_image_id(this_image_name),
-                    'caption': captions_deco[j] # TODO: this has both beam and vote caption. We want to evaluate them in turn
+                    'image_id': extract_image_id(image_name),
+                    'captions': {
+                        'beam': beam_dec,
+                        'voted': voted_dec
+                    }
                 }
                 annotations.append(annotation)
+
+                if FLAGS.save_output_images:
+                    image_caption = beam_dec + '\n' + '\n'.join(voted_dec)
+                    output_image_path = os.path.join(FLAGS.results_dir, image_name)
+                    input_image_path = imread(os.path.join(FLAGS.test_dir, image_name))
+                    write_text_on_image(input_image_path, output_image_path, image_caption)
 
         with open(FLAGS.save_json_file, 'w') as outfile:
             json.dump(annotations, outfile)
@@ -242,7 +240,14 @@ if __name__ == '__main__':
         '--save_json_file',
         type=str,
         default="./annotations.json",
-        help="Store the resulting annotiations in a json file"
+        help="Store the resulting annotations in a json file"
+    )
+
+    parser.add_argument(
+        '--save_output_images',
+        type=bool,
+        default=False,
+        help="Set to True to save annotated images to disk (requires matplotlib)"
     )
 
     FLAGS, unparsed = parser.parse_known_args()
