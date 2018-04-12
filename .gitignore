@@ -1,6 +1,11 @@
-model/savedSession*/
-model/__pycache__/
-
 *.swp
 
-annotations.json
+**/annotations.json
+**/savedSession*/
+**/savedImages*/
+**/__pycache__/
+
+.ipynb_checkpoints/
+.idea/
+
+vocab/

@@ -1,4 +1,16 @@
-# Image Captioning Model in TensorFlow
+# Generating natural language with a range voting system
+Use a range voting system to sample from the language model. Each possible sentence votes for other sentence by a similarity score. The scores are then weighted by the probability of the sentence and summed. The sentence with the highest vote is chosen.
+
+The aim of this is to remove the bias from shorter sentences and to overcome the boring problem output, for e.g. vague answers or "I don't know" in a dialogue system.
+
+The similarity can be computed in several ways, the simplest being a bag of words overlap frequency. This is implemented in `inference_on_folder_bow_voting.py`.
+
+Further ways of computing the similarity include similarity between the last hidden state of the LSTM language model or training a further similarity network based on the hidden states of the LSTM. This methods will be explored next.
+
+
+The code for the image captioning model was taken from [https://github.com/aaxwaz/Image-Captioning-Model-in-TensorFlow](https://github.com/aaxwaz/Image-Captioning-Model-in-TensorFlow). The instructions from that repo are copied below:
+
+## Image Captioning Model in TensorFlow
 
 This repo follows the blog post from here: 
 https://vanishingcodes.wordpress.com/2017/03/20/using-tensorflow-to-build-image-to-text-deep-learning-application/

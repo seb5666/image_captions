@@ -50,6 +50,8 @@ class Caption(object):
     assert isinstance(other, Caption)
     return self.score == other.score
 
+  def __str__(self):
+    return "{}: {}".format(self.score, self.sentence)
 
 class TopN(object):
   """Maintains the top n elements of an incrementally provided set."""
