@@ -76,7 +76,7 @@ def main(_):
     ## get the vocaboluary 
     list_of_all_words = None 
     results = preprocess_json_files(FLAGS.file_dir)
-    
+    print("Preprocessing JSON files from {}".format(FLAGS.file_dir)) 
     for k, v in results.items():
         if list_of_all_words is None:
             list_of_all_words = results[k][0].copy()
@@ -105,7 +105,8 @@ def main(_):
     word_dict['word_to_idx'] = word_to_idx
     with open(os.path.join(FLAGS.file_dir, 'coco2014_vocab.json'), 'w') as f:
         json.dump(word_dict, f)
-        
+    print("Created word dictionaries...")
+
     ## convert sentences into encoding/integers
     # pad all sentence to length of FLAGS.padding_len - 2 
     def _convert_sentence_to_numbers(s):

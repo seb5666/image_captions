@@ -55,4 +55,4 @@ class TrainingConfig(object):
     # If not None, clip gradients to this value.
     self.clip_gradients = 5.0
 
-    self.total_num_epochs = 5
+    self.total_num_epochs = 20

@@ -109,6 +109,7 @@ def run_inference(sess, features, generator, keep_prob):
     final_preds = []
 
     for i in range(batch_size):
+        print("Batch {}/{}".format(i, batch_size))
         feature = features[i].reshape(1, -1)
         pred = generator.beam_search(sess, feature)
         pred = pred[0].sentence
@@ -174,11 +175,15 @@ def main(_):
             # saved the images with captions written on them
             if not os.path.exists(FLAGS.results_dir):
                 os.makedirs(FLAGS.results_dir)
+
             for j in range(len(captions_deco)):
+                if j % 1000 == 0:
+                    print("Done {} images...".format(j))
+
                 this_image_name = all_image_names['file_name'].values[j]
                 img_name = os.path.join(FLAGS.results_dir, this_image_name)
                 img = imread(os.path.join(FLAGS.test_dir, this_image_name))
-                write_text_on_image(img, img_name, captions_deco[j])
+                #write_text_on_image(img, img_name, captions_deco[j])
 
                 annotation = {
                     'image_id': extract_image_id(this_image_name),

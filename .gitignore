@@ -1,2 +1,6 @@
-model/savedSession/
-model/__pychache__/
+model/savedSession*/
+model/__pycache__/
+
+*.swp
+
+annotations.json
