@@ -156,10 +156,6 @@ def main(_):
             # beam_preds, vote_preds = run_inference2(sess, features, generator, data, inference_batch_size)
             # exit()
 
-            # saved the images with captions written on them
-            if not os.path.exists(FLAGS.results_dir):
-                os.makedirs(FLAGS.results_dir)
-
             for i, (beam_caption, voted_captions) in enumerate(zip(beam_preds, vote_preds)):
 
                 beam_dec = decode_captions(beam_caption, data['idx_to_word'])
@@ -183,6 +179,9 @@ def main(_):
                 annotations.append(annotation)
 
                 if FLAGS.save_output_images:
+                    # saved the images with captions written on them
+                    if not os.path.exists(FLAGS.results_dir):
+                        os.makedirs(FLAGS.results_dir)
                     image_caption = beam_dec + '\n' + '\n'.join(voted_dec)
                     output_image_path = os.path.join(FLAGS.results_dir, image_name)
                     input_image_path = imread(os.path.join(FLAGS.test_dir, image_name))
