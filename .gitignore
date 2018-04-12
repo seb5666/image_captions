@@ -1,2 +1,10 @@
-model/savedSession/
-model/__pychache__/
+**/savedSession*/
+**/savedImages*/
+**/__pycache__/
+
+.ipynb_checkpoints/
+.idea/
+
+model/annotations.json
+
+vocab/
