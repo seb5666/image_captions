@@ -135,10 +135,10 @@ def main(_):
     # Parameters
     voting_scheme = "reweighted"
     num_winners = 3
-    beam_size = 100
-    batch_size = 1
+    beam_size = 10
+    batch_size = 2
     normalise_votes = False
-    num_processes = 10
+    num_processes = 4
 
     # load dictionary
     data = {}
@@ -151,17 +151,29 @@ def main(_):
     print("Loaded dictionary...")
     print("Dictionary size: {}".format(len(data['idx_to_word'])))
 
-    # extract all features
     multiprocessing.set_start_method("spawn")
-    with multiprocessing.Pool() as p:
-        features, all_image_names = p.apply(extract_features, args=(FLAGS.test_dir, FLAGS.pretrain_dir))
-        print("Features extracted... Shape: {}".format(features.shape))
-    tf.reset_default_graph()
 
-    num_of_images = len(os.listdir(FLAGS.test_dir))
+    if FLAGS.load_features:
+        features = np.load(os.path.join(FLAGS.test_dir + "features.npy"))
+        all_image_names = np.load(os.path.join(FLAGS.test_dir + "image_names.npy"))
+        assert(len(features) == len(all_image_names))
+        print("Loaded {} features from {}".format(len(features), FLAGS.test_dir))
+    else:
+        with multiprocessing.Pool() as p:
+            # extract all features
+            features, all_image_names = p.apply(extract_features, args=(FLAGS.test_dir, FLAGS.pretrain_dir))
+            tf.reset_default_graph()
+            print("Features extracted... Shape: {}".format(features.shape))
+
+        all_image_names = all_image_names['file_name'].values
+
+        np.save(os.path.join(FLAGS.test_dir, "features.npy"), features)
+        np.save(os.path.join(FLAGS.test_dir, "image_names.npy"), all_image_names)
+        print("Saved features and names to {}".format(FLAGS.test_dir))
+
+    num_of_images = len(features)
     print("Inferencing on {} images".format(num_of_images))
 
-    all_image_names = all_image_names['file_name'].values
 
     features_batches = [features[i * batch_size: (i + 1) * batch_size] for i in range(num_of_images // batch_size + 1)]
     image_names_batches = [all_image_names[i * batch_size: (i + 1) * batch_size] for i in
@@ -244,6 +256,13 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '--save_output_images',
+        type=bool,
+        default=False,
+        help="Set to True to save annotated images to disk (requires matplotlib)"
+    )
+
+    parser.add_argument(
+        '--load_features',
         type=bool,
         default=False,
         help="Set to True to save annotated images to disk (requires matplotlib)"

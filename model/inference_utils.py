@@ -54,8 +54,9 @@ def extract_features(image_dir, pretrain_dir):
         final_array = []
         extract_tensor = sess.graph.get_tensor_by_name(layer_to_extract)
         counter = 0
-        print("There are total " + str(len(os.listdir(image_dir))) + " images to process.")
         all_image_names = os.listdir(image_dir)
+        all_image_names = [name for name in all_image_names if name.endswith(".jpg")]
+        print("There are total " + str(len(all_image_names)) + " images to process.")
         all_image_names = pd.DataFrame({'file_name': all_image_names})
 
         for img in all_image_names['file_name'].values:
@@ -69,6 +70,7 @@ def extract_features(image_dir, pretrain_dir):
             final_array.append(predictions)
 
         final_array = np.array(final_array)
+
     return final_array, all_image_names
 
 
