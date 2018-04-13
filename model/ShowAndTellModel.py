@@ -14,6 +14,67 @@ Outputs:
 
 import tensorflow as tf
 
+#
+# def build_model2(config):
+#
+#     # A float32 Tensor with shape [batch_size, image_feature_size].
+#     image_feature = tf.placeholder(tf.float32, [None, config.image_feature_size], name='image_feature')
+#
+#     # An int32 Tensor with shape [batch_size, padded_length].
+#     input_seqs = tf.placeholder(tf.int32, [None, None], name='input_seqs')
+#
+#     # An int32 Tensor with shape [batch_size, padded_length].
+#     target_seqs = tf.placeholder(tf.int32, [None, None], name='target_seqs')
+#
+#     # A float32 Tensor with shape [1]
+#     keep_prob = tf.placeholder(tf.float32, name='keep_prob')
+#
+#     initializer = tf.random_uniform_initializer(
+#         minval=-config.initializer_scale,
+#         maxval=config.initializer_scale)
+#
+#     # Vocabulary embeddings
+#     with tf.variable_scope("seq_embedding"), tf.device("/cpu:0"):
+#         embedding_map = tf.get_variable(
+#             name="map",
+#             shape=[config.vocab_size, config.embedding_size],
+#             initializer=initializer)
+#
+#         seq_embedding = tf.nn.embedding_lookup(embedding_map, input_seqs)
+#
+#     lstm_cell = tf.nn.rnn_cell.LSTMCell(
+#         num_units=config.num_lstm_units, state_is_tuple=True)
+#
+#     lstm_cell = tf.nn.rnn_cell.DropoutWrapper(
+#         lstm_cell,
+#         input_keep_prob=keep_prob,
+#         output_keep_prob=keep_prob)
+#
+#     with tf.variable_scope('image_embeddings'):
+#         image_embeddings_map = tf.layers.Dense(
+#             units=config.embedding_size,
+#             activation=None,
+#             kernel_initializer=initializer,
+#             use_biases=False)
+#
+#         image_embeddings = image_embeddings_map(inputs=image_feature)
+#
+#     with tf.variable_scope("lstm", initializer=initializer) as lstm_scope:
+#         zero_state = lstm_cell.zero_state(batch_size=config.batch_size, dtype=tf.float32)
+#
+#         # Build RNN cell
+#         decoder_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units)
+#         # Helper
+#         helper = tf.contrib.seq2seq.TrainingHelper(
+#             decoder_emb_inp, decoder_lengths, time_major=True)
+#         # Decoder
+#         decoder = tf.contrib.seq2seq.BasicDecoder(
+#             decoder_cell, helper, encoder_state,
+#             output_layer=projection_layer)
+#         # Dynamic decoding
+#         outputs, _ = tf.contrib.seq2seq.dynamic_decode(decoder, ...)
+#         logits = outputs.rnn_output
+
 def build_model(config, mode, inference_batch = None, glove_vocab = None):
 
     """Basic setup.
@@ -46,7 +107,7 @@ def build_model(config, mode, inference_batch = None, glove_vocab = None):
 
     # An int32 0/1 Tensor with shape [batch_size, padded_length].
     input_mask = tf.placeholder(tf.int32, [None, None], name='input_mask')
-    
+
     # A float32 Tensor with shape [batch_size, image_feature_size].
     image_feature = tf.placeholder(tf.float32, [None, config.image_feature_size], name='image_feature')
 
@@ -69,11 +130,13 @@ def build_model(config, mode, inference_batch = None, glove_vocab = None):
     global_step = None
     
     """Sets up the global step Tensor."""
-    global_step = tf.Variable(
-    initial_value=0,
-    name="global_step",
-    trainable=False,
-    collections=[tf.GraphKeys.GLOBAL_STEP, tf.GraphKeys.GLOBAL_VARIABLES])
+    with(tf.variable_scope('', reuse=tf.AUTO_REUSE)):
+        global_step = tf.get_variable(
+        initializer=0,
+        dtype=tf.int32,
+        name="global_step",
+        trainable=False,
+        collections=[tf.GraphKeys.GLOBAL_STEP, tf.GraphKeys.GLOBAL_VARIABLES])
     
     ### Builds the input sequence embeddings ###
     # Inputs:
@@ -82,7 +145,7 @@ def build_model(config, mode, inference_batch = None, glove_vocab = None):
     #   self.seq_embeddings
     ############################################
 
-    with tf.variable_scope("seq_embedding"), tf.device("/cpu:0"):
+    with tf.variable_scope("seq_embedding", reuse=tf.AUTO_REUSE), tf.device("/cpu:0"):
         if glove_vocab is None:
             embedding_map = tf.get_variable(
                 name="map",
@@ -115,7 +178,7 @@ def build_model(config, mode, inference_batch = None, glove_vocab = None):
         input_keep_prob=keep_prob,
         output_keep_prob=keep_prob)
 
-    with tf.variable_scope("lstm", initializer=initializer) as lstm_scope:
+    with tf.variable_scope("lstm", initializer=initializer, reuse=tf.AUTO_REUSE) as lstm_scope:
     
       # Feed the image embeddings to set the initial LSTM state.
       if mode == 'train':
@@ -150,7 +213,7 @@ def build_model(config, mode, inference_batch = None, glove_vocab = None):
       # Stack batches vertically.
       lstm_outputs = tf.reshape(lstm_outputs, [-1, lstm_cell.output_size]) # output_size == 256
       
-    with tf.variable_scope('logits'):
+    with tf.variable_scope('logits', reuse=tf.AUTO_REUSE):
         W = tf.get_variable('W', [lstm_cell.output_size, config.vocab_size], initializer=initializer)
         b = tf.get_variable('b', [config.vocab_size], initializer=tf.constant_initializer(0.0))
         
@@ -171,8 +234,8 @@ def build_model(config, mode, inference_batch = None, glove_vocab = None):
     batch_loss = tf.div(tf.reduce_sum(tf.multiply(losses, weights)),
                         tf.reduce_sum(weights),
                         name="batch_loss")
-    tf.contrib.losses.add_loss(batch_loss)
-    total_loss = tf.contrib.losses.get_total_loss()
+    tf.losses.add_loss(batch_loss)
+    total_loss = tf.losses.get_total_loss()
     
     # target_cross_entropy_losses = losses  # Used in evaluation.
     # target_cross_entropy_loss_weights = weights  # Used in evaluation.

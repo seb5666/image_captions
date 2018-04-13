@@ -13,6 +13,7 @@ from image_utils import image_from_url, write_text_on_image
 import numpy as np
 from scipy.misc import imread
 import os
+import multiprocessing
 import sys
 import json
 import argparse
@@ -21,6 +22,7 @@ from caption_generator import *
 from inference_utils import extract_features, extract_image_id
 
 from voting_utils import reweighted_range_vote, range_vote
+from similarities import unigram_overlap
 
 model_config = configuration.ModelConfig()
 training_config = configuration.TrainingConfig()
@@ -29,45 +31,16 @@ FLAGS = None
 verbose = True
 mode = 'inference'
 
-
-def bow_overlap(s, t):
-    if len(s) == 0 or len(t) == 0:
-        return 0
-
-    if s[0] == '<START>':
-        s = s[1:]
-    if t[0] == '<START>':
-        t = t[1:]
-    if s[-1] == '<END>':
-        s = s[:-1]
-    if t[-1] == '<END>':
-        t = t[:-1]
-
-    # Don't take into account multiplicity
-    unique_words = set(s)
-    overlap = 0
-    for w in unique_words:
-        overlap += 1 if w in t else 0
-
-    if len(unique_words):
-        sim = overlap / len(unique_words)
-    else:
-        sim = 0
-
-    return sim
-
 # Run inference but do beam search in batches for better efficiency...
 def run_inference2(sess, features, generator, data, batch_size):
     generator.beam_search2(sess, features, batch_size=batch_size)
 
 # TODO: make this work for larger batch sizes... Otherwise evaluation will take too long
-def run_inference(sess, features, generator, data, num_winners=1, voting_scheme="range"):
+def run_inference(sess, features, generator, data, num_winners=1, voting_scheme="range", normalise_votes=False):
     vote_preds = []
     beam_preds = []
 
     for i in range(len(features)):
-        if i % 1000 == 0:
-            print("Image {}/{}".format(i, len(features)))
         feature = features[i].reshape(1, -1)
 
         preds = generator.beam_search(sess, feature)
@@ -78,7 +51,10 @@ def run_inference(sess, features, generator, data, num_winners=1, voting_scheme=
         sentences = [pred.sentence for pred in preds]
 
         # Compute pair-wise similarity
-        similarity = np.array([[bow_overlap(p, q) for q in sentences] for p in sentences])
+        similarity = np.array([[unigram_overlap(p, q) for q in sentences] for p in sentences])
+
+        if normalise_votes:
+            similarity = similarity / np.max(similarity, axis=1)[:, np.newaxis]
 
         if voting_scheme == "range":
             vote_pred = preds[range_vote(similarity, scores)].sentence
@@ -97,15 +73,69 @@ def run_inference(sess, features, generator, data, num_winners=1, voting_scheme=
 
     return beam_preds, vote_preds
 
+
+def create_annotations(features, image_names, data, saved_sess, beam_size=3, voting_scheme="range", num_winners=1, normalise_votes=False):
+    # Build the model.
+    model = build_model(model_config, mode, inference_batch=1)
+
+    # Initialize beam search Caption Generator
+    generator = CaptionGenerator(
+        model,
+        data['word_to_idx'],
+        max_caption_length=model_config.padded_length - 1,
+        beam_size=beam_size)
+    # run training
+    init = tf.global_variables_initializer()
+
+    with tf.Session() as sess:
+
+        sess.run(init)
+        model['saver'].restore(sess, saved_sess)
+
+        # predictions
+        beam_preds, vote_preds = run_inference(
+            sess,
+            features,
+            generator,
+            data,
+            voting_scheme=voting_scheme,
+            num_winners=num_winners,
+            normalise_votes=normalise_votes)
+
+        annotations = []
+
+        for j, (beam_caption, voted_captions) in enumerate(zip(beam_preds, vote_preds)):
+            beam_dec = decode_captions(beam_caption, data['idx_to_word'])
+            beam_dec = ' '.join(beam_dec)
+
+            voted_dec = []
+            for voted_caption in voted_captions:
+                vote_dec = decode_captions(voted_caption, data['idx_to_word'])
+                vote_dec = ' '.join(vote_dec)
+                voted_dec.append(vote_dec)
+
+            image_name = image_names[j]
+
+            annotation = {
+                'image_id': extract_image_id(image_name),
+                'captions': {
+                    'beam': beam_dec,
+                    'voted': voted_dec
+                }
+            }
+            annotations.append(annotation)
+
+        print("Created annotations for {} images".format(len(features)))
+        return annotations
+
+
 def main(_):
-
     # Parameters
-    voting_scheme = "reweighted"
-    num_winners = 4
-    beam_size = 10
-
-    inference_batch_size = 1
-
+    voting_scheme = "range"
+    num_winners = 1
+    beam_size = 1
+    batch_size = 10
+    normalise_votes = False
 
     # load dictionary
     data = {}
@@ -122,75 +152,39 @@ def main(_):
     features, all_image_names = extract_features(FLAGS.test_dir, FLAGS.pretrain_dir)
     print("Features extracted... Shape: {}".format(features.shape))
 
-    # Build the TensorFlow graph
-    g = tf.Graph()
-    with g.as_default():
-        num_of_images = len(os.listdir(FLAGS.test_dir))
-        print("Inferencing on {} images".format(num_of_images))
+    num_of_images = len(os.listdir(FLAGS.test_dir))
+    print("Inferencing on {} images".format(num_of_images))
 
-        # Build the model.
-        model = build_model(model_config, mode, inference_batch=inference_batch_size)
+    all_image_names = all_image_names['file_name'].values
 
-        # Initialize beam search Caption Generator
-        generator = CaptionGenerator(
-            model,
-            data['word_to_idx'],
-            max_caption_length=model_config.padded_length - 1,
-            beam_size=beam_size)
+    features_batches = [features[i * batch_size: (i + 1) * batch_size] for i in range(num_of_images // batch_size + 1)]
+    image_names_batches = [all_image_names[i * batch_size: (i + 1) * batch_size] for i in
+                           range(num_of_images // batch_size + 1)]
 
-        # run training
-        init = tf.global_variables_initializer()
+    print("Number of batches: {}".format(len(features_batches)))
+
+    multiprocessing.set_start_method("spawn")
+    with multiprocessing.Pool() as p:
+        results = [
+            p.apply_async(create_annotations, args=(features, image_names), kwds={
+                "data": data,
+                "saved_sess": FLAGS.saved_sess,
+                "beam_size": beam_size,
+                "voting_scheme": voting_scheme,
+                "num_winners": num_winners,
+                "normalise_votes": normalise_votes
+            })
+            for (features, image_names) in zip(features_batches, image_names_batches)]
 
         annotations = []
+        for result in results:
+            annotations.extend(result.get())
 
-        with tf.Session() as sess:
-
-            sess.run(init)
-
-            model['saver'].restore(sess, FLAGS.saved_sess)
-
-            print("Model restored! Last step run: ", sess.run(model['global_step']))
-
-            # predictions
-            beam_preds, vote_preds = run_inference(sess, features, generator, data, voting_scheme=voting_scheme, num_winners=num_winners)
-            # beam_preds, vote_preds = run_inference2(sess, features, generator, data, inference_batch_size)
-            # exit()
-
-            for i, (beam_caption, voted_captions) in enumerate(zip(beam_preds, vote_preds)):
-
-                beam_dec = decode_captions(beam_caption, data['idx_to_word'])
-                beam_dec = ' '.join(beam_dec)
-
-                voted_dec = []
-                for voted_caption in voted_captions:
-                    vote_dec = decode_captions(voted_caption, data['idx_to_word'])
-                    vote_dec = ' '.join(vote_dec)
-                    voted_dec.append(vote_dec)
-
-                image_name = all_image_names['file_name'].values[i]
-
-                annotation = {
-                    'image_id': extract_image_id(image_name),
-                    'captions': {
-                        'beam': beam_dec,
-                        'voted': voted_dec
-                    }
-                }
-                annotations.append(annotation)
-
-                if FLAGS.save_output_images:
-                    # saved the images with captions written on them
-                    if not os.path.exists(FLAGS.results_dir):
-                        os.makedirs(FLAGS.results_dir)
-                    image_caption = beam_dec + '\n' + '\n'.join(voted_dec)
-                    output_image_path = os.path.join(FLAGS.results_dir, image_name)
-                    input_image_path = imread(os.path.join(FLAGS.test_dir, image_name))
-                    write_text_on_image(input_image_path, output_image_path, image_caption)
-
-        with open(FLAGS.save_json_file, 'w') as outfile:
-            json.dump(annotations, outfile)
-
-    print("\ndone.")
+    print("Created {} annotations".format(len(annotations)))
+    # Initialise output file
+    with open(FLAGS.save_json_file, 'w') as outfile:
+        json.dump(annotations, outfile)
+    print("Saved output file {}".format(FLAGS.save_json_file))
 
 
 if __name__ == '__main__':
