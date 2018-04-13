@@ -74,7 +74,7 @@ def run_inference(sess, features, generator, data, num_winners=1, voting_scheme=
     return beam_preds, vote_preds
 
 
-def create_annotations(features, image_names, data, saved_sess, beam_size=3, voting_scheme="range", num_winners=1, normalise_votes=False):
+def create_annotations(features, image_names, data, num_processes, saved_sess, beam_size=3, voting_scheme="range", num_winners=1, normalise_votes=False):
     # Build the model.
     model = build_model(model_config, mode, inference_batch=1)
 
@@ -87,7 +87,9 @@ def create_annotations(features, image_names, data, saved_sess, beam_size=3, vot
     # run training
     init = tf.global_variables_initializer()
 
-    with tf.Session() as sess:
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=1/num_processes)
+
+    with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         sess.run(init)
         model['saver'].restore(sess, saved_sess)
@@ -163,11 +165,14 @@ def main(_):
 
     print("Number of batches: {}".format(len(features_batches)))
 
+    num_processes = os.cpu_count()
+
     multiprocessing.set_start_method("spawn")
     with multiprocessing.Pool() as p:
         results = [
             p.apply_async(create_annotations, args=(features, image_names), kwds={
                 "data": data,
+                "num_processes": num_processes,
                 "saved_sess": FLAGS.saved_sess,
                 "beam_size": beam_size,
                 "voting_scheme": voting_scheme,
