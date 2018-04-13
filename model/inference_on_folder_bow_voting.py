@@ -86,11 +86,11 @@ def create_annotations(features, image_names, data, num_processes, saved_sess, b
         beam_size=beam_size)
     # run training
     init = tf.global_variables_initializer()
-
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=1/num_processes)
+    
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=1/(2 * num_processes))
 
     with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
-
+    #with tf.Session() as sess:
         sess.run(init)
         model['saver'].restore(sess, saved_sess)
 
@@ -133,11 +133,12 @@ def create_annotations(features, image_names, data, num_processes, saved_sess, b
 
 def main(_):
     # Parameters
-    voting_scheme = "range"
-    num_winners = 1
-    beam_size = 1
-    batch_size = 10
+    voting_scheme = "reweighted"
+    num_winners = 3
+    beam_size = 100
+    batch_size = 1
     normalise_votes = False
+    num_processes = 10
 
     # load dictionary
     data = {}
@@ -151,8 +152,11 @@ def main(_):
     print("Dictionary size: {}".format(len(data['idx_to_word'])))
 
     # extract all features
-    features, all_image_names = extract_features(FLAGS.test_dir, FLAGS.pretrain_dir)
-    print("Features extracted... Shape: {}".format(features.shape))
+    multiprocessing.set_start_method("spawn")
+    with multiprocessing.Pool() as p:
+        features, all_image_names = p.apply(extract_features, args=(FLAGS.test_dir, FLAGS.pretrain_dir))
+        print("Features extracted... Shape: {}".format(features.shape))
+    tf.reset_default_graph()
 
     num_of_images = len(os.listdir(FLAGS.test_dir))
     print("Inferencing on {} images".format(num_of_images))
@@ -165,9 +169,6 @@ def main(_):
 
     print("Number of batches: {}".format(len(features_batches)))
 
-    num_processes = os.cpu_count()
-
-    multiprocessing.set_start_method("spawn")
     with multiprocessing.Pool() as p:
         results = [
             p.apply_async(create_annotations, args=(features, image_names), kwds={
