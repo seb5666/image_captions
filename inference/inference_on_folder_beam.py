@@ -59,9 +59,7 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3):
             scores = []
             captions = []
             for caption in beam_predictions:
-                print(caption.sentence)
                 score = np.exp(caption.score)
-                print(score)
                 captions.append(caption.sentence)
                 scores.append(score)
                 total_prob += score
