@@ -7,21 +7,17 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-from datetime import datetime 
 import configuration
 from ShowAndTellModel import build_model
 from coco_utils import load_coco_data, sample_coco_minibatch, decode_captions
-from image_utils import image_from_url, write_text_on_image
 import numpy as np
-import scipy.misc
-from scipy.misc import imread
-import pandas as pd
 import os
-from six.moves import urllib
-import sys 
-import tarfile
+import sys
 import json
 import argparse
+
+from inference_utils import extract_features, extract_image_id, run_inference
+
 from caption_generator import * 
 
 model_config = configuration.ModelConfig()
@@ -31,227 +27,169 @@ FLAGS = None
 verbose = True
 mode = 'inference'
 
-pretrain_model_name = 'classify_image_graph_def.pb'
-layer_to_extract = 'pool_3:0'
-MODEL_URL = 'http://download.tensorflow.org/models/image/imagenet/inception-2015-12-05.tgz'
+def save_beam_captions(features, image_names, data, saved_sess, beam_size=3):
+    print(beam_size)
+    model = build_model(model_config, mode, inference_batch=1)
 
-def maybe_download_and_extract():
-  """Download and extract model tar file."""
-  dest_directory = FLAGS.pretrain_dir
-  if not os.path.exists(dest_directory):
-    os.makedirs(dest_directory)
-  filename = MODEL_URL.split('/')[-1]
-  filepath = os.path.join(dest_directory, filename)
-  if not os.path.exists(filepath):
-    def _progress(count, block_size, total_size):
-      sys.stdout.write('\r>> Downloading %s %.1f%%' % (
-          filename, float(count * block_size) / float(total_size) * 100.0))
-      sys.stdout.flush()
-    filepath, _ = urllib.request.urlretrieve(MODEL_URL, filepath, _progress)
-    print()
-    statinfo = os.stat(filepath)
-    print('Successfully downloaded', filename, statinfo.st_size, 'bytes.')
-  tarfile.open(filepath, 'r:gz').extractall(dest_directory)
+    generator = CaptionGenerator(
+        model,
+        data['word_to_idx'],
+        max_caption_length=model_config.padded_length - 1,
+        beam_size=beam_size
+    )
 
-def create_graph():
-  """Creates a graph from saved GraphDef file and returns a saver."""
-  # Creates graph from saved graph_def.pb.
-  with tf.gfile.FastGFile(os.path.join(
-      FLAGS.pretrain_dir, pretrain_model_name), 'rb') as f:
-    graph_def = tf.GraphDef()
-    graph_def.ParseFromString(f.read())
-    _ = tf.import_graph_def(graph_def, name='')
+    init = tf.global_variables_initializer()
 
-def extract_features(image_dir):
-
-    if not os.path.exists(image_dir):
-        print("image_dir does not exit!")
-        return None
-
-    maybe_download_and_extract()
-    
-    create_graph()
-        
     with tf.Session() as sess:
-        # Some useful tensors:
-        # 'softmax:0': A tensor containing the normalized prediction across
-        #   1000 labels.
-        # 'pool_3:0': A tensor containing the next-to-last layer containing 2048
-        #   float description of the image.
-        # 'DecodeJpeg/contents:0': A tensor containing a string providing JPEG
-        #   encoding of the image.
-        # Runs the softmax tensor by feeding the image_data as input to the graph.
-        final_array = []
-        extract_tensor = sess.graph.get_tensor_by_name(layer_to_extract)
-        counter = 0
-        print("There are total " + str(len(os.listdir(image_dir))) + " images to process.")
-        all_image_names = os.listdir(image_dir)
-        all_image_names = pd.DataFrame({'file_name': all_image_names})
-        
-        for img in all_image_names['file_name'].values:
-                
-            temp_path = os.path.join(image_dir, img)
-            
-            image_data = tf.gfile.FastGFile(temp_path, 'rb').read()
-            
-            predictions = sess.run(extract_tensor, {'DecodeJpeg/contents:0': image_data})
-            predictions = np.squeeze(predictions)
+        sess.run(init)
+        model['saver'].restore(sess, saved_sess)
 
-            final_array.append(predictions)
 
-        final_array = np.array(final_array)
-    return final_array, all_image_names
+        for i, (img_feature, image_name) in enumerate(zip(features, image_names)):
+            if (i+1) % 100 == 0:
+                print("Saved beams for {} out {} images".format(i+1, len(features)))
+            image_id = extract_image_id(image_name)
+            output_file = os.path.join(FLAGS.save_dir, str(image_id) + ".json")
+            if os.path.isfile(output_file):
+                continue
 
-def run_inference(sess, features, generator, keep_prob):
+            beam_predictions = run_inference(sess, np.array([img_feature]), generator, data)[0]
 
-    batch_size = features.shape[0]
+            total_prob = 0
+            scores = []
+            captions = []
+            for caption in beam_predictions:
+                print(caption.sentence)
+                score = np.exp(caption.score)
+                print(score)
+                captions.append(caption.sentence)
+                scores.append(score)
+                total_prob += score
 
-    final_preds = []
+            beam_captions = {
+                'image_id': image_id,
+                'captions': captions,
+                'probabilities': scores,
+                'total_prob': total_prob
+            }
 
-    for i in range(batch_size):
-        print("Batch {}/{}".format(i, batch_size))
-        feature = features[i].reshape(1, -1)
-        pred = generator.beam_search(sess, feature)
-        pred = pred[0].sentence
-        final_preds.append(np.array(pred))
-        
-    return final_preds
+            # Initialise output file
+            with open(output_file, 'w+') as outfile:
+                json.dump(beam_captions, outfile)
 
-def extract_image_id(image_name):
-    name, extension = image_name.split(".")
-    assert(extension == "jpg")
-    return int(name.split("_")[-1])
+        print("Created annotations for {} images".format(len(features)))
+
 
 def main(_):
-    
-    # load dictionary 
+
+    # Parameters
+    beam_size = 100
+
+    # load dictionary
     data = {}
     with open(FLAGS.dict_file, 'r') as f:
         dict_data = json.load(f)
         for k, v in dict_data.items():
             data[k] = v
-    data['idx_to_word'] = {int(k):v for k, v in data['idx_to_word'].items()}
+    data['idx_to_word'] = {int(k): v for k, v in data['idx_to_word'].items()}
+
     print("Loaded dictionary...")
+    print("Dictionary size: {}".format(len(data['idx_to_word'])))
 
-    # extract all features 
-    features, all_image_names = extract_features(FLAGS.test_dir)
-    print("Features extracted...")
 
-    # Build the TensorFlow graph and train it
-    g = tf.Graph()
-    with g.as_default():
-        num_of_images = len(os.listdir(FLAGS.test_dir))
-        print("Inferencing on {} images".format(num_of_images))
-        
-        # Build the model.
-        model = build_model(model_config, mode, inference_batch = 1)
-        
-        # Initialize beam search Caption Generator 
-        generator = CaptionGenerator(model, data['word_to_idx'], max_caption_length = model_config.padded_length-1)
-        
-        # run training 
-        init = tf.global_variables_initializer()
+    if FLAGS.load_features:
+        features = np.load(os.path.join(FLAGS.test_dir + "features.npy"))
+        all_image_names = np.load(os.path.join(FLAGS.test_dir + "image_names.npy"))
+        assert(len(features) == len(all_image_names))
+        print("Loaded {} features from {}".format(len(features), FLAGS.test_dir))
+    else:
+        features, all_image_names = extract_features(FLAGS.test_dir, FLAGS.pretrain_dir)
+        print("Features extracted... Shape: {}".format(features.shape))
+        all_image_names = all_image_names['file_name'].values
 
-        annotations = []
+        np.save(os.path.join(FLAGS.test_dir, "features.npy"), features)
+        np.save(os.path.join(FLAGS.test_dir, "image_names.npy"), all_image_names)
+        print("Saved features and names to {}".format(FLAGS.test_dir))
 
-        with tf.Session() as sess:
-        
-            sess.run(init)
-        
-            model['saver'].restore(sess, FLAGS.saved_sess)
-              
-            print("Model restored! Last step run: ", sess.run(model['global_step']))
-            
-            # predictions 
-            final_preds = run_inference(sess, features, generator, 1.0)
-            captions_pred = [unpack.reshape(-1, 1) for unpack in final_preds]
-            # captions_pred = np.concatenate(captions_pred, 1)
-            captions_deco= []
-            for cap in captions_pred:
-                dec = decode_captions(cap.reshape(-1, 1), data['idx_to_word'])
-                dec = ' '.join(dec)
-                captions_deco.append(dec)
-            
-            # saved the images with captions written on them
-            if not os.path.exists(FLAGS.results_dir):
-                os.makedirs(FLAGS.results_dir)
+    num_of_images = len(features)
+    print("Inferencing on {} images".format(num_of_images))
+    save_beam_captions(features, all_image_names, data=data, saved_sess=FLAGS.saved_sess, beam_size=beam_size)
+    print("Done")
 
-            for j in range(len(captions_deco)):
-                if j % 1000 == 0:
-                    print("Done {} images...".format(j))
-
-                this_image_name = all_image_names['file_name'].values[j]
-                img_name = os.path.join(FLAGS.results_dir, this_image_name)
-                img = imread(os.path.join(FLAGS.test_dir, this_image_name))
-                #write_text_on_image(img, img_name, captions_deco[j])
-
-                annotation = {
-                    'image_id': extract_image_id(this_image_name),
-                    'caption': captions_deco[j]
-                }
-                annotations.append(annotation)
-
-        with open(FLAGS.save_json_file, 'w') as outfile:
-            json.dump(annotations, outfile)
-
-    print("\ndone.")
-               
 if __name__ == '__main__':
-  parser = argparse.ArgumentParser()
-  parser.add_argument(
-      '--pretrain_dir',
-      type=str,
-      default= '/tmp/imagenet/',
-      help="""\
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--pretrain_dir',
+        type=str,
+        default='/tmp/imagenet/',
+        help="""\
       Path to pretrained model (if not found, will download from web)\
       """
-  )
-  parser.add_argument(
-      '--test_dir',
-      type=str,
-      default= '/home/ubuntu/COCO/testImages/', 
-      help="""\
+    )
+    parser.add_argument(
+        '--test_dir',
+        type=str,
+        default='/home/ubuntu/COCO/testImages/',
+        help="""\
       Path to dir of test images to be predicted\
       """
-  )
-  parser.add_argument(
-      '--results_dir',
-      type=str,
-      default= '/home/ubuntu/COCO/savedTestImages/', 
-      help="""\
+    )
+    parser.add_argument(
+        '--results_dir',
+        type=str,
+        default='/home/ubuntu/COCO/savedTestImages/',
+        help="""\
       Path to dir of predicted test images\
       """
-  )
-  parser.add_argument(
-      '--saved_sess',
-      type=str,
-      default= "/home/ubuntu/COCO/savedSession/model0.ckpt", 
-      help="""\
+    )
+    parser.add_argument(
+        '--saved_sess',
+        type=str,
+        default="/home/ubuntu/COCO/savedSession/model0.ckpt",
+        help="""\
       Path to saved session\
       """
-  )
-  parser.add_argument(
-      '--dict_file',
-      type=str,
-      default= '/home/ubuntu/COCO/dataset/COCO_captioning/coco2014_vocab.json', 
-      help="""\
+    )
+    parser.add_argument(
+        '--dict_file',
+        type=str,
+        default='/home/ubuntu/COCO/dataset/COCO_captioning/coco2014_vocab.json',
+        help="""\
       Path to dictionary file\
       """
-  )
-  parser.add_argument(
-      '--save_json_file',
-      type=str,
-      default="./annotations.json",
-      help="Store the resulting annotiations in a json file"
-  )
+    )
+    parser.add_argument(
+        '--save_dir',
+        type=str,
+        default="../outputs/beam_captions/",
+        help="Store the resulting annotations in a json file"
+    )
 
-  FLAGS, unparsed = parser.parse_known_args()
-  tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+    parser.add_argument(
+        '--save_output_images',
+        type=bool,
+        default=False,
+        help="Set to True to save annotated images to disk (requires matplotlib)"
+    )
 
-    
-  
-  
-  
-  
-  
-  
+    parser.add_argument(
+        '--load_features',
+        type=bool,
+        default=False,
+        help="Set to True if the image features (embeddings) should be loaded from disk"
+    )
+
+    parser.add_argument(
+        '--run_parallel',
+        type=bool,
+        default=False,
+        help="Set to true if multiple process should create captions in parallel"
+    )
+
+    FLAGS, unparsed = parser.parse_known_args()
+    tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+
+
+
+
+

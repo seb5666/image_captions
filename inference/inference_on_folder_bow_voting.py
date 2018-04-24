@@ -19,10 +19,13 @@ import json
 import argparse
 from caption_generator import *
 
-from inference_utils import extract_features, extract_image_id
+from inference_utils import extract_features, extract_image_id, run_inference
 
 from voting_utils import reweighted_range_vote, range_vote
 from similarities import unigram_overlap
+
+
+import h5py
 
 model_config = configuration.ModelConfig()
 training_config = configuration.TrainingConfig()
@@ -34,17 +37,6 @@ mode = 'inference'
 # Run inference but do beam search in batches for better efficiency...
 def run_inference2(sess, features, generator, data, batch_size):
     generator.beam_search2(sess, features, batch_size=batch_size)
-
-# TODO: make this work for larger batch sizes... Otherwise evaluation will take too long
-def run_inference(sess, features, generator, data, num_winners=1):
-    beam_preds = []
-
-    for i in range(len(features)):
-        feature = features[i].reshape(1, -1)
-        preds = generator.beam_search(sess, feature)
-        beam_preds.append(preds)
-
-    return beam_preds
 
 def range_vote_caption(beam_predictions,  normalise_votes=False):
     sentences = [pred.sentence for pred in beam_predictions]

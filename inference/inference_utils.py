@@ -78,3 +78,13 @@ def extract_image_id(image_name):
     name, extension = image_name.split(".")
     assert (extension == "jpg")
     return int(name.split("_")[-1])
+
+def run_inference(sess, features, generator, data, num_winners=1):
+    beam_preds = []
+
+    for i in range(len(features)):
+        feature = features[i].reshape(1, -1)
+        preds = generator.beam_search(sess, feature)
+        beam_preds.append(preds)
+
+    return beam_preds
