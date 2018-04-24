@@ -6,7 +6,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-import configuration
+from model import configuration
 from ShowAndTellModel import build_model
 from coco_utils import load_coco_data, sample_coco_minibatch, decode_captions
 from image_utils import image_from_url, write_text_on_image
@@ -36,43 +36,53 @@ def run_inference2(sess, features, generator, data, batch_size):
     generator.beam_search2(sess, features, batch_size=batch_size)
 
 # TODO: make this work for larger batch sizes... Otherwise evaluation will take too long
-def run_inference(sess, features, generator, data, num_winners=1, voting_scheme="range", normalise_votes=False):
-    vote_preds = []
+def run_inference(sess, features, generator, data, num_winners=1):
     beam_preds = []
 
     for i in range(len(features)):
         feature = features[i].reshape(1, -1)
-
         preds = generator.beam_search(sess, feature)
+        beam_preds.append(preds)
 
-        scores = [pred.score for pred in preds]
-        scores = np.exp(np.array(scores))
+    return beam_preds
 
-        sentences = [pred.sentence for pred in preds]
+def range_vote_caption(beam_predictions,  normalise_votes=False):
+    sentences = [pred.sentence for pred in beam_predictions]
+    scores = [pred.score for pred in beam_predictions]
+    scores = np.exp(np.array(scores))
 
-        # Compute pair-wise similarity
-        similarity = np.array([[unigram_overlap(p, q) for q in sentences] for p in sentences])
+    # Compute pair-wise similarity
+    similarity = np.array([[unigram_overlap(p, q) for q in sentences] for p in sentences])
 
-        if normalise_votes:
-            similarity = similarity / np.max(similarity, axis=1)[:, np.newaxis]
+    if normalise_votes:
+        similarity = similarity / np.max(similarity, axis=1)[:, np.newaxis]
 
-        if voting_scheme == "range":
-            vote_pred = preds[range_vote(similarity, scores)].sentence
-            vote_preds.append([np.array(vote_pred)])
+    vote_pred = beam_predictions[range_vote(similarity, scores)].sentence
+    return [np.array(vote_pred)]
 
-        elif voting_scheme == "reweighted":
-            assert (num_winners <= len(scores))
-            winners = [winner for (i, winner) in zip(range(num_winners), reweighted_range_vote(similarity, scores))]
-            vote_preds.append([np.array(preds[x].sentence) for x in winners])
 
-        else:
-            raise ValueError("Invalid voting scheme {}".format(voting_scheme))
+def rrv_caption(beam_predictions,  num_winners=1, normalise_votes=False):
+    """
+    Reweighted range vote caption for the beam predictions given
+    :param beam_predictions: beam captions
+    :param num_winners: number of captions to return
+    :param normalise_votes: true if the votes are normalised to the range [0,1]
+    :return: A list containing top num_winners captions in the RRV election
+    """
+    sentences = [pred.sentence for pred in beam_predictions]
+    scores = [pred.score for pred in beam_predictions]
+    scores = np.exp(np.array(scores))
 
-        beam_pred = preds[0].sentence
-        beam_preds.append(np.array(beam_pred))
+    assert (num_winners <= len(scores))
 
-    return beam_preds, vote_preds
+    # Compute pair-wise similarity
+    similarity = np.array([[unigram_overlap(p, q) for q in sentences] for p in sentences])
+    if normalise_votes:
+        similarity = similarity / np.max(similarity, axis=1)[:, np.newaxis]
 
+    winners = [winner for (i, winner) in zip(range(num_winners), reweighted_range_vote(similarity, scores))]
+
+    return [np.array(beam_predictions[x].sentence) for x in winners]
 
 def create_annotations(features, image_names, data, num_processes, saved_sess, beam_size=3, voting_scheme="range", num_winners=1, normalise_votes=False):
     # Build the model.
@@ -95,20 +105,28 @@ def create_annotations(features, image_names, data, num_processes, saved_sess, b
         model['saver'].restore(sess, saved_sess)
 
         # predictions
-        beam_preds, vote_preds = run_inference(
+        beam_preds = run_inference(
             sess,
             features,
             generator,
-            data,
-            voting_scheme=voting_scheme,
-            num_winners=num_winners,
-            normalise_votes=normalise_votes)
+            data)
 
         annotations = []
 
-        for j, (beam_caption, voted_captions) in enumerate(zip(beam_preds, vote_preds)):
-            beam_dec = decode_captions(beam_caption, data['idx_to_word'])
-            beam_dec = ' '.join(beam_dec)
+        for j, beam_captions in enumerate(beam_preds):
+            beam_dec = []
+            total_prob = 0
+            for caption in beam_captions:
+                sentence = ' '.join(decode_captions(caption.sentence, data['idx_to_word']))
+                prob = np.exp(caption.score)
+                beam_dec.append({
+                    'caption': sentence,
+                    'prob': prob
+                })
+                total_prob += prob
+            print(total_prob)
+
+            voted_captions = rrv_caption(beam_captions, num_winners=num_winners, normalise_votes=normalise_votes)
 
             voted_dec = []
             for voted_caption in voted_captions:
@@ -135,9 +153,10 @@ def main(_):
     # Parameters
     voting_scheme = "reweighted"
     num_winners = 3
-    beam_size = 10
+    beam_size = 100
     batch_size = 2
     normalise_votes = False
+
     num_processes = 4
 
     # load dictionary
@@ -159,7 +178,7 @@ def main(_):
         assert(len(features) == len(all_image_names))
         print("Loaded {} features from {}".format(len(features), FLAGS.test_dir))
     else:
-        with multiprocessing.Pool() as p:
+        with multiprocessing.Pool(processes=num_processes) as p:
             # extract all features
             features, all_image_names = p.apply(extract_features, args=(FLAGS.test_dir, FLAGS.pretrain_dir))
             tf.reset_default_graph()
@@ -174,29 +193,44 @@ def main(_):
     num_of_images = len(features)
     print("Inferencing on {} images".format(num_of_images))
 
+    num_batches = num_of_images // batch_size + (1 if num_of_images %  batch_size != 0 else 0)
 
-    features_batches = [features[i * batch_size: (i + 1) * batch_size] for i in range(num_of_images // batch_size + 1)]
-    image_names_batches = [all_image_names[i * batch_size: (i + 1) * batch_size] for i in
-                           range(num_of_images // batch_size + 1)]
+    features_batches = [features[i * batch_size: (i + 1) * batch_size] for i in range(num_batches)]
+    image_names_batches = [all_image_names[i * batch_size: (i + 1) * batch_size] for i in range(num_batches)]
 
     print("Number of batches: {}".format(len(features_batches)))
 
-    with multiprocessing.Pool() as p:
-        results = [
-            p.apply_async(create_annotations, args=(features, image_names), kwds={
-                "data": data,
-                "num_processes": num_processes,
-                "saved_sess": FLAGS.saved_sess,
-                "beam_size": beam_size,
-                "voting_scheme": voting_scheme,
-                "num_winners": num_winners,
-                "normalise_votes": normalise_votes
-            })
-            for (features, image_names) in zip(features_batches, image_names_batches)]
+    if FLAGS.run_parallel:
+        with multiprocessing.Pool() as p:
+            results = [
+                p.apply_async(create_annotations, args=(features, image_names), kwds={
+                    "data": data,
+                    "num_processes": num_processes,
+                    "saved_sess": FLAGS.saved_sess,
+                    "beam_size": beam_size,
+                    "voting_scheme": voting_scheme,
+                    "num_winners": num_winners,
+                    "normalise_votes": normalise_votes
+                })
+                for (features, image_names) in zip(features_batches, image_names_batches)]
 
+            annotations = []
+            for result in results:
+                annotations.extend(result.get())
+    else:
         annotations = []
-        for result in results:
-            annotations.extend(result.get())
+        for (features, image_names) in zip(features_batches, image_names_batches):
+            anns = create_annotations(features,
+                                image_names,
+                                data=data,
+                                num_processes=num_processes,
+                                saved_sess=FLAGS.saved_sess,
+                                beam_size=beam_size,
+                                voting_scheme=voting_scheme,
+                                num_winners=num_winners,
+                                normalise_votes=normalise_votes)
+
+            annotations.extend(anns)
 
     print("Created {} annotations".format(len(annotations)))
     # Initialise output file
@@ -250,7 +284,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--save_json_file',
         type=str,
-        default="./annotations.json",
+        default="../outputs/annotations.json",
         help="Store the resulting annotations in a json file"
     )
 
@@ -265,7 +299,14 @@ if __name__ == '__main__':
         '--load_features',
         type=bool,
         default=False,
-        help="Set to True to save annotated images to disk (requires matplotlib)"
+        help="Set to True if the image features (embeddings) should be loaded from disk"
+    )
+
+    parser.add_argument(
+        '--run_parallel',
+        type=bool,
+        default=False,
+        help="Set to true if multiple process should create captions in parallel"
     )
 
     FLAGS, unparsed = parser.parse_known_args()

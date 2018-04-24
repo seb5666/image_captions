@@ -11,6 +11,8 @@ import math
 
 import numpy as np
 
+from tensorflow.contrib.seq2seq import BeamSearchDecoder
+
 class Caption(object):
   """Represents a complete or partial caption."""
 
@@ -129,7 +131,6 @@ class CaptionGenerator(object):
     return state
     
   def _inference_step(self, sess, input_feed_list, state_feed_list, max_caption_length):
-  
     mask = np.zeros((1, max_caption_length))
     mask[:, 0] = 1
     softmax_outputs = []
@@ -138,13 +139,37 @@ class CaptionGenerator(object):
     for input, state in zip(input_feed_list, state_feed_list):
         feed_dict={self.model['input_seqs']: input, 
                    self.model['initial_state']: state, 
-                   self.model['input_mask']: mask, 
+                   self.model['input_mask']: mask,
                    self.model['keep_prob']: 1.0}
         softmax, new_state = sess.run([self.model['softmax'], self.model['final_state']], feed_dict=feed_dict)
         softmax_outputs.append(softmax)
         new_state_outputs.append(new_state)
         
     return softmax_outputs, new_state_outputs, None
+
+  def beam_search2(self, sess, features, batch_size):
+    # TODO: extract initial states for the given batch size
+    print(features.shape)
+    initial_state = self._feed_image(sess, features)
+    print(initial_state[0].shape)
+    print(initial_state[1].shape)
+    # init2 = self._feed_image(sess, features[0])
+    # print(init2.shape)
+
+    # Define a beam-search decoder
+    decoder = tf.contrib.seq2seq.BeamSearchDecoder(
+      cell=decoder_cell,
+      embedding=embedding_decoder,
+      start_tokens=start_tokens,
+      end_token=end_token,
+      initial_state=decoder_initial_state,
+      beam_width=beam_width,
+      output_layer=projection_layer,
+      length_penalty_weight=0.0)
+
+    # Dynamic decoding
+    outputs, _ = tf.contrib.seq2seq.dynamic_decode(decoder, ...)
+    print("Done")
 
   def beam_search(self, sess, feature):
     """Runs beam search caption generation on a single image.
@@ -163,6 +188,7 @@ class CaptionGenerator(object):
         logprob=0.0,
         score=0.0,
         metadata=[""])
+
     partial_captions = TopN(self.beam_size)
     partial_captions.push(initial_beam)
     complete_captions = TopN(self.beam_size)
