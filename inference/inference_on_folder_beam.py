@@ -27,8 +27,7 @@ FLAGS = None
 verbose = True
 mode = 'inference'
 
-def save_beam_captions(features, image_names, data, saved_sess, beam_size=3):
-    print(beam_size)
+def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, batch_size = 16):
     model = build_model(model_config, mode, inference_batch=1)
 
     generator = CaptionGenerator(
@@ -38,44 +37,69 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3):
         beam_size=beam_size
     )
 
+    num_batches = len(features) // batch_size + (1 if len(features) % batch_size != 0 else 0)
+
+    features_batches = [features[i * batch_size : (i+1) * batch_size] for i in range(num_batches)]
+    image_names_batches = [image_names[i * batch_size : (i+1) * batch_size] for i in range(num_batches)]
+
     init = tf.global_variables_initializer()
+
+    total_images_processed = 0
 
     with tf.Session() as sess:
         sess.run(init)
         model['saver'].restore(sess, saved_sess)
 
+        for j, (features_batch, image_names_batch) in enumerate(zip(features_batches, image_names_batches)):
 
-        for i, (img_feature, image_name) in enumerate(zip(features, image_names)):
-            if (i+1) % 100 == 0:
-                print("Saved beams for {} out {} images".format(i+1, len(features)))
-            image_id = extract_image_id(image_name)
-            output_file = os.path.join(FLAGS.save_dir, str(image_id) + ".json")
-            if os.path.isfile(output_file):
+            features = []
+            image_names = []
+
+            for i, image_name in enumerate(image_names_batch):
+                image_id = extract_image_id(image_name)
+                output_file = os.path.join(FLAGS.save_dir, str(image_id) + ".json")
+                if not os.path.isfile(output_file):
+                    features.append(features_batch[i])
+                    image_names.append(image_name)
+
+            if len(features) == 0:
+                print("Skipping batch {}".format(j + 1))
                 continue
 
-            beam_predictions = run_inference(sess, np.array([img_feature]), generator, data)[0]
+            total_images_processed += len(features)
 
-            total_prob = 0
-            scores = []
-            captions = []
-            for caption in beam_predictions:
-                score = np.exp(caption.score)
-                captions.append(caption.sentence)
-                scores.append(score)
-                total_prob += score
+            features = np.array(features)
 
-            beam_captions = {
-                'image_id': image_id,
-                'captions': captions,
-                'probabilities': scores,
-                'total_prob': total_prob
-            }
+            beam_predictions_batch = run_inference(sess, features, generator)
 
-            # Initialise output file
-            with open(output_file, 'w+') as outfile:
-                json.dump(beam_captions, outfile)
+            for beam_predictions, image_name in zip(beam_predictions_batch, image_names):
+                image_id = extract_image_id(image_name)
+                output_file = os.path.join(FLAGS.save_dir, str(image_id) + ".json")
 
-        print("Created annotations for {} images".format(len(features)))
+                total_prob = 0
+                scores = []
+                captions = []
+                for caption in beam_predictions:
+                    score = np.exp(caption.score)
+                    captions.append(caption.sentence)
+                    scores.append(score)
+                    total_prob += score
+
+                beam_captions = {
+                    'image_id': image_id,
+                    'captions': captions,
+                    'probabilities': scores,
+                    'total_prob': total_prob
+                }
+
+                print("Saving to {}".format(output_file))
+                # Initialise output file
+                with open(output_file, 'w+') as outfile:
+                    json.dump(beam_captions, outfile)
+
+            print("Saved beams for batch {} out {}".format(j + 1, num_batches))
+
+        print("Created annotations for {} images".format(total_images_processed))
 
 
 def main(_):

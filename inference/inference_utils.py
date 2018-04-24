@@ -79,7 +79,7 @@ def extract_image_id(image_name):
     assert (extension == "jpg")
     return int(name.split("_")[-1])
 
-def run_inference(sess, features, generator, data, num_winners=1):
+def run_inference(sess, features, generator):
     beam_preds = []
 
     for i in range(len(features)):
