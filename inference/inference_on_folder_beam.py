@@ -57,6 +57,9 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
 
             for i, image_name in enumerate(image_names_batch):
                 image_id = extract_image_id(image_name)
+
+                if FLAGS.starts_with is not None and not str(image_id).startswith(FLAGS.starts_with):
+                    continue
                 output_file = os.path.join(FLAGS.save_dir, str(image_id) + ".json")
                 if not os.path.isfile(output_file):
                     features.append(features_batch[i])
@@ -206,6 +209,13 @@ if __name__ == '__main__':
         type=bool,
         default=False,
         help="Set to true if multiple process should create captions in parallel"
+    )
+
+    parser.add_argument(
+        '--starts_with',
+        type=str,
+        default=None,
+        help="Only consider images whose id starts with the given value. None to consider all"
     )
 
     FLAGS, unparsed = parser.parse_known_args()
