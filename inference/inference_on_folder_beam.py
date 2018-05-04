@@ -60,6 +60,7 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
 
                 if FLAGS.starts_with is not None and not str(image_id).startswith(FLAGS.starts_with):
                     continue
+
                 output_file = os.path.join(FLAGS.save_dir, str(image_id) + ".json")
                 if not os.path.isfile(output_file):
                     features.append(features_batch[i])
@@ -84,9 +85,12 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
                 captions = []
                 for caption in beam_predictions:
                     score = np.exp(caption.score)
-                    captions.append(caption.sentence)
-                    scores.append(score)
+                    c = {}
+                    c['score'] = score
+                    c['sentence'] = caption.sentence
+                    c['hidden_states'] = caption.state_history
                     total_prob += score
+                    captions.append(c)
 
                 beam_captions = {
                     'image_id': image_id,

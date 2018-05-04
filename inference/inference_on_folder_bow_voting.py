@@ -21,9 +21,7 @@ from caption_generator import *
 
 from inference_utils import extract_features, extract_image_id, run_inference
 
-from voting_utils import reweighted_range_vote, range_vote
-from similarities import unigram_overlap
-
+from voting import rrv_captions_from_beam
 
 import h5py
 
@@ -37,44 +35,6 @@ mode = 'inference'
 # Run inference but do beam search in batches for better efficiency...
 def run_inference2(sess, features, generator, data, batch_size):
     generator.beam_search2(sess, features, batch_size=batch_size)
-
-def range_vote_caption(beam_predictions,  normalise_votes=False):
-    sentences = [pred.sentence for pred in beam_predictions]
-    scores = [pred.score for pred in beam_predictions]
-    scores = np.exp(np.array(scores))
-
-    # Compute pair-wise similarity
-    similarity = np.array([[unigram_overlap(p, q) for q in sentences] for p in sentences])
-
-    if normalise_votes:
-        similarity = similarity / np.max(similarity, axis=1)[:, np.newaxis]
-
-    vote_pred = beam_predictions[range_vote(similarity, scores)].sentence
-    return [np.array(vote_pred)]
-
-
-def rrv_caption(beam_predictions,  num_winners=1, normalise_votes=False):
-    """
-    Reweighted range vote caption for the beam predictions given
-    :param beam_predictions: beam captions
-    :param num_winners: number of captions to return
-    :param normalise_votes: true if the votes are normalised to the range [0,1]
-    :return: A list containing top num_winners captions in the RRV election
-    """
-    sentences = [pred.sentence for pred in beam_predictions]
-    scores = [pred.score for pred in beam_predictions]
-    scores = np.exp(np.array(scores))
-
-    assert (num_winners <= len(scores))
-
-    # Compute pair-wise similarity
-    similarity = np.array([[unigram_overlap(p, q) for q in sentences] for p in sentences])
-    if normalise_votes:
-        similarity = similarity / np.max(similarity, axis=1)[:, np.newaxis]
-
-    winners = [winner for (i, winner) in zip(range(num_winners), reweighted_range_vote(similarity, scores))]
-
-    return [np.array(beam_predictions[x].sentence) for x in winners]
 
 def create_annotations(features, image_names, data, num_processes, saved_sess, beam_size=3, voting_scheme="range", num_winners=1, normalise_votes=False):
     # Build the model.
@@ -100,8 +60,7 @@ def create_annotations(features, image_names, data, num_processes, saved_sess, b
         beam_preds = run_inference(
             sess,
             features,
-            generator,
-            data)
+            generator)
 
         annotations = []
 
@@ -118,7 +77,7 @@ def create_annotations(features, image_names, data, num_processes, saved_sess, b
                 total_prob += prob
             print(total_prob)
 
-            voted_captions = rrv_caption(beam_captions, num_winners=num_winners, normalise_votes=normalise_votes)
+            voted_captions = rrv_captions_from_beam(beam_captions, num_winners=num_winners, normalise_votes=normalise_votes)
 
             voted_dec = []
             for voted_caption in voted_captions:

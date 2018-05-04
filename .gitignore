@@ -1,4 +1,5 @@
 *.swp
+*.pickle
 
 **/annotations.json
 **/savedSession*/

@@ -16,7 +16,7 @@ from tensorflow.contrib.seq2seq import BeamSearchDecoder
 class Caption(object):
   """Represents a complete or partial caption."""
 
-  def __init__(self, sentence, state, logprob, score, metadata=None):
+  def __init__(self, sentence, state, logprob, score, state_history = [], metadata=None):
     """Initializes the Caption.
     Args:
       sentence: List of word ids in the caption.
@@ -30,6 +30,7 @@ class Caption(object):
     self.state = state
     self.logprob = logprob
     self.score = score
+    self.state_history = state_history
     self.metadata = metadata
 
   def __cmp__(self, other):
@@ -147,30 +148,6 @@ class CaptionGenerator(object):
         
     return softmax_outputs, new_state_outputs, None
 
-  def beam_search2(self, sess, features, batch_size):
-    # TODO: extract initial states for the given batch size
-    print(features.shape)
-    initial_state = self._feed_image(sess, features)
-    print(initial_state[0].shape)
-    print(initial_state[1].shape)
-    # init2 = self._feed_image(sess, features[0])
-    # print(init2.shape)
-
-    # Define a beam-search decoder
-    decoder = tf.contrib.seq2seq.BeamSearchDecoder(
-      cell=decoder_cell,
-      embedding=embedding_decoder,
-      start_tokens=start_tokens,
-      end_token=end_token,
-      initial_state=decoder_initial_state,
-      beam_width=beam_width,
-      output_layer=projection_layer,
-      length_penalty_weight=0.0)
-
-    # Dynamic decoding
-    outputs, _ = tf.contrib.seq2seq.dynamic_decode(decoder, ...)
-    print("Done")
-
   def beam_search(self, sess, feature):
     """Runs beam search caption generation on a single image.
     Args:
@@ -187,7 +164,8 @@ class CaptionGenerator(object):
         state=initial_state,
         logprob=0.0,
         score=0.0,
-        metadata=[""])
+        metadata=[""],
+        state_history = [(initial_state.c[0].tolist(), initial_state.h[0].tolist())])
 
     partial_captions = TopN(self.beam_size)
     partial_captions.push(initial_beam)
@@ -208,10 +186,12 @@ class CaptionGenerator(object):
       for i, partial_caption in enumerate(partial_captions_list):
         word_probabilities = softmax[i][0]
         state = new_states[i]
+
         # For this partial caption, get the beam_size most probable next words.
         words_and_probs = list(enumerate(word_probabilities))
         words_and_probs.sort(key=lambda x: -x[1])
         words_and_probs = words_and_probs[0:self.beam_size]
+
         # Each next word gives a new partial caption.
         for w, p in words_and_probs:
           if p < 1e-12:
@@ -223,13 +203,14 @@ class CaptionGenerator(object):
             metadata_list = partial_caption.metadata + [metadata[i]]
           else:
             metadata_list = None
+          state_history = partial_caption.state_history + [(state.c[0].tolist(), state.h[0].tolist())]
           if w == self.vocab['<END>']:
             if self.length_normalization_factor > 0:
               score /= len(sentence)**self.length_normalization_factor
-            beam = Caption(sentence, state, logprob, score, metadata_list)
+            beam = Caption(sentence, state, logprob, score, state_history, metadata_list)
             complete_captions.push(beam)
           else:
-            beam = Caption(sentence, state, logprob, score, metadata_list)
+            beam = Caption(sentence, state, logprob, score, state_history, metadata_list)
             partial_captions.push(beam)
       if partial_captions.size() == 0:
         # We have run out of partial candidates; happens when beam_size = 1.
