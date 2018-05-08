@@ -88,7 +88,8 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
                     c = {}
                     c['score'] = score
                     c['sentence'] = caption.sentence
-                    c['hidden_states'] = caption.state_history
+                    state_history = np.array(caption.state_history)
+                    c['hidden_state_average'] = np.mean(state_history, axis=0).tolist()
                     total_prob += score
                     captions.append(c)
 

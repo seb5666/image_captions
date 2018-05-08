@@ -14,67 +14,6 @@ Outputs:
 
 import tensorflow as tf
 
-#
-# def build_model2(config):
-#
-#     # A float32 Tensor with shape [batch_size, image_feature_size].
-#     image_feature = tf.placeholder(tf.float32, [None, config.image_feature_size], name='image_feature')
-#
-#     # An int32 Tensor with shape [batch_size, padded_length].
-#     input_seqs = tf.placeholder(tf.int32, [None, None], name='input_seqs')
-#
-#     # An int32 Tensor with shape [batch_size, padded_length].
-#     target_seqs = tf.placeholder(tf.int32, [None, None], name='target_seqs')
-#
-#     # A float32 Tensor with shape [1]
-#     keep_prob = tf.placeholder(tf.float32, name='keep_prob')
-#
-#     initializer = tf.random_uniform_initializer(
-#         minval=-config.initializer_scale,
-#         maxval=config.initializer_scale)
-#
-#     # Vocabulary embeddings
-#     with tf.variable_scope("seq_embedding"), tf.device("/cpu:0"):
-#         embedding_map = tf.get_variable(
-#             name="map",
-#             shape=[config.vocab_size, config.embedding_size],
-#             initializer=initializer)
-#
-#         seq_embedding = tf.nn.embedding_lookup(embedding_map, input_seqs)
-#
-#     lstm_cell = tf.nn.rnn_cell.LSTMCell(
-#         num_units=config.num_lstm_units, state_is_tuple=True)
-#
-#     lstm_cell = tf.nn.rnn_cell.DropoutWrapper(
-#         lstm_cell,
-#         input_keep_prob=keep_prob,
-#         output_keep_prob=keep_prob)
-#
-#     with tf.variable_scope('image_embeddings'):
-#         image_embeddings_map = tf.layers.Dense(
-#             units=config.embedding_size,
-#             activation=None,
-#             kernel_initializer=initializer,
-#             use_biases=False)
-#
-#         image_embeddings = image_embeddings_map(inputs=image_feature)
-#
-#     with tf.variable_scope("lstm", initializer=initializer) as lstm_scope:
-#         zero_state = lstm_cell.zero_state(batch_size=config.batch_size, dtype=tf.float32)
-#
-#         # Build RNN cell
-#         decoder_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units)
-#         # Helper
-#         helper = tf.contrib.seq2seq.TrainingHelper(
-#             decoder_emb_inp, decoder_lengths, time_major=True)
-#         # Decoder
-#         decoder = tf.contrib.seq2seq.BasicDecoder(
-#             decoder_cell, helper, encoder_state,
-#             output_layer=projection_layer)
-#         # Dynamic decoding
-#         outputs, _ = tf.contrib.seq2seq.dynamic_decode(decoder, ...)
-#         logits = outputs.rnn_output
-
 def build_model(config, mode, inference_batch = None, glove_vocab = None):
 
     """Basic setup.

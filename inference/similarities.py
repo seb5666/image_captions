@@ -70,8 +70,8 @@ def bigram_overlap(s, t):
     if len(s) == 0 or len(t) == 0:
         return 0
 
-    bigrams_s = list(zip(s[:,-1], s[1:]))
-    bigram_t = list(zip(t[:,-1], t[1:]))
+    bigrams_s = list(zip(s[:-1], s[1:]))
+    bigram_t = list(zip(t[:-1], t[1:]))
 
     overlap = 0
     for bigram in bigrams_s:
@@ -86,6 +86,8 @@ if __name__ == "__main__":
     print("Test")
     s = [1, 4, 140, 36, 6, 4, 31, 28, 4, 163, 2]
     t = [1, 4, 140, 36, 6, 4, 31, 28, 4, 3, 2]
-    print(bleu_score.sentence_bleu([s], t))
     print(bleu_similarity(s, t))
     print(compute_bleu([[s]], [t])[0])
+
+    print("Bigrams")
+    print(bigram_overlap(s, t))
