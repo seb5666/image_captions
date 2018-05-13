@@ -10,3 +10,6 @@
 .idea/
 
 outputs/
+
+rouge/
+rouge-python/
