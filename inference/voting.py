@@ -39,7 +39,7 @@ def rrv_captions(sentences, scores, num_winners=1, normalise_votes=False, simila
     if normalise_votes:
         similarity = similarity / np.max(similarity, axis=1)[:, np.newaxis]
 
-    winners = [winner for (i, winner) in zip(range(num_winners), reweighted_range_vote(similarity, scores))]
+    winners = [winner for (_, winner) in zip(range(num_winners), reweighted_range_vote(similarity, scores))]
 
     return [np.array(sentences[x]) for x in winners], [scores[x] for x in winners]
 

@@ -10,6 +10,7 @@ sys.path.append("../utils") # go to parent dir
 from voting import rrv_captions
 from similarities import unigram_precision, bigram_overlap, bleu_similarity
 from prepare_captions import preprocess_json_files
+import numpy as np
 
 def load_vocab(dict_file):
     data = {}
@@ -98,6 +99,30 @@ def rrv_votes(caption_object, num_winners=5, normalise_votes=False, similarity="
                         num_winners=num_winners,
                         normalise_votes=normalise_votes)
 
+
+def rrv_votes_hidden_vector(caption_object, num_winners=5, normalise_votes=False):
+    def cosine_sim(c1, c2):
+        print(c1.keys())
+        print(c2.keys())
+        print()
+        return None
+
+    print(caption_object)
+    scores = caption_object['probabilities']
+    assert (num_winners <= len(scores))
+
+    # Compute pair-wise similarity
+    similarity = np.array([[cosine_sim(p, q) for q in caption_object] for p in caption_object])
+
+    if normalise_votes:
+        similarity = similarity / np.max(similarity, axis=1)[:, np.newaxis]
+
+    winners = [winner for (_, winner) in zip(range(num_winners), reweighted_range_vote(similarity, scores))]
+
+    captions = [np.array(sentences[x]) for x in winners], [scores[x] for x in winners]
+
+    print(captions)
+    return captions
 
 if __name__== "__main__":
     dict_file = "../outputs/vocab/5000/coco2014_vocab.json"

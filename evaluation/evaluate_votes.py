@@ -1,7 +1,7 @@
 import os
 from tqdm import tqdm
 from json import JSONDecodeError
-from utils import load_vocab, load_annotations, load_caption, decode_caption, rrv_votes
+from utils import load_vocab, load_annotations, load_caption, decode_caption, rrv_votes, rrv_votes_hidden_vector
 
 vocab_file = "./outputs/vocab/5000/coco2014_vocab.json"
 beam_captions_dir = "./outputs/beam_captions/"
@@ -29,12 +29,16 @@ for i, image in enumerate(tqdm(images)):
     image_id = int(image.split('.')[0])
     try:
         caption_object = load_caption(image_id, image_dir=image_dir)
-        vote_captions[image_id] = rrv_votes(caption_object, num_winners=5)
+        vote_captions[image_id] = rrv_votes_hidden_vector(caption_object, num_winners=5)
     except JSONDecodeError:
         print("Error on ", image_id)
 
+    if i == 2:
+        break
+
 with open(save_file, 'wb') as handle:
     pickle.dump(vote_captions, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
 
 # Evaluate using BLEU
 annotation_captions = []
@@ -54,7 +58,8 @@ vote_blue_4 = bleu_score.corpus_bleu(annotation_captions, best_voted_caption, we
 print("Beam scores")
 print("Bleu-1: {:.4f}".format(beam_bleu_1))
 print("Bleu-1: {:.4f}".format(beam_bleu_4))
-print()g
+print()
+
 print("Vote scores")
 print("Bleu-1: {:.4f}".format(vote_bleu_1))
 print("Bleu-1: {:.4f}".format(vote_bleu_4))
