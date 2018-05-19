@@ -7,11 +7,11 @@ import sys
 sys.path.append("../inference") # go to parent dir
 sys.path.append("../utils") # go to parent dir
 
-from voting import rrv_captions
-from similarities import unigram_precision, bigram_overlap, bleu_similarity
+from voting import rrv_captions, reweighted_range_vote
+from similarities import unigram_precision, bigram_overlap, bleu_similarity, bigram_precision
 from prepare_captions import preprocess_json_files
 import numpy as np
-
+from scipy.spatial import distance
 def load_vocab(dict_file):
     data = {}
     with open(dict_file, 'r') as f:
@@ -75,7 +75,7 @@ def _load_image_indexes_map(map_file = "../outputs/val_image_id_to_idx.csv"):
     return image_id_to_index, index_to_image_id
 
 def rrv_votes(caption_object, num_winners=5, normalise_votes=False, similarity="unigram"):
-    if similarity == "unigram_multiplicicy":
+    if similarity == "unigram_multiplicity":
         return rrv_captions(caption_object['captions'],
                             caption_object['probabilities'],
                             num_winners=num_winners,
@@ -87,32 +87,35 @@ def rrv_votes(caption_object, num_winners=5, normalise_votes=False, similarity="
                             num_winners=num_winners,
                             normalise_votes=normalise_votes,
                             similarity=bleu_similarity)
-    elif similarity == "bigram":
+    elif similarity == "bigram_overlap":
         return rrv_captions(caption_object['captions'],
                             caption_object['probabilities'],
                             num_winners=num_winners,
                             normalise_votes=normalise_votes,
                             similarity=bigram_overlap)
-    else:
+    elif similarity == "bigram_precision":
+        return rrv_captions(caption_object['captions'],
+                            caption_object['probabilities'],
+                            num_winners=num_winners,
+                            normalise_votes=normalise_votes,
+                            similarity=bigram_precision)
+    elif similarity == "unigram_precision":
         return rrv_captions(caption_object['captions'],
                         caption_object['probabilities'],
                         num_winners=num_winners,
                         normalise_votes=normalise_votes)
+    
+    raise ValueError("Unkown similarity {}".format(similarity))
 
 
 def rrv_votes_hidden_vector(caption_object, num_winners=5, normalise_votes=False):
-    def cosine_sim(c1, c2):
-        print(c1.keys())
-        print(c2.keys())
-        print()
-        return None
-
-    print(caption_object)
-    scores = caption_object['probabilities']
+    scores = [c['score'] for c in caption_object]
+    hidden_states = [np.array(c['hidden_state_average'][1]) for c in caption_object]
+    sentences = [c['sentence'] for c in caption_object]
     assert (num_winners <= len(scores))
-
+   	
     # Compute pair-wise similarity
-    similarity = np.array([[cosine_sim(p, q) for q in caption_object] for p in caption_object])
+    similarity = np.array([[distance.cosine(p, q) for q in hidden_states] for p in hidden_states])
 
     if normalise_votes:
         similarity = similarity / np.max(similarity, axis=1)[:, np.newaxis]
@@ -121,7 +124,6 @@ def rrv_votes_hidden_vector(caption_object, num_winners=5, normalise_votes=False
 
     captions = [np.array(sentences[x]) for x in winners], [scores[x] for x in winners]
 
-    print(captions)
     return captions
 
 if __name__== "__main__":

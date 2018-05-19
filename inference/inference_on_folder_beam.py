@@ -97,7 +97,8 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
                     'image_id': image_id,
                     'captions': captions,
                     'probabilities': scores,
-                    'total_prob': total_prob
+                    'total_prob': total_prob,
+
                 }
 
                 print("Saving to {}".format(output_file))
@@ -113,7 +114,7 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
 def main(_):
 
     # Parameters
-    beam_size = 100
+    beam_size = 5
 
     # load dictionary
     data = {}

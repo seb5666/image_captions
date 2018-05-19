@@ -67,6 +67,24 @@ def unigram_precision(s, t):
 def bigram_overlap(s, t):
     s = remove_tags(s)
     t = remove_tags(t)
+
+    if len(s) == 0 or len(t) == 0:
+        return 0
+
+    bigrams_s = list(zip(s[:-1], s[1:]))
+    bigrams_t = list(zip(t[:-1], t[1:]))
+
+    bigrams_s = set(bigrams_s)
+    bigrams_t = set(bigrams_t)
+
+    overlap = 0
+    for bigram in bigrams_s:
+        overlap += 1 if bigram in bigrams_t else 0
+    return overlap / len(bigrams_s)
+
+def bigram_precision(s, t):
+    s = remove_tags(s)
+    t = remove_tags(t)
     if len(s) == 0 or len(t) == 0:
         return 0
 
@@ -77,7 +95,6 @@ def bigram_overlap(s, t):
     for bigram in bigrams_s:
         overlap += 1 if bigram in bigram_t else 0
     return overlap / len(bigrams_s)
-
 def bleu_similarity(s, t):
     return compute_bleu([[s]], [t])[0]
 
