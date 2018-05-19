@@ -41,7 +41,7 @@ def rrv_captions(sentences, scores, num_winners=1, normalise_votes=False, simila
 
     winners = [winner for (_, winner) in zip(range(num_winners), reweighted_range_vote(similarity, scores))]
 
-    return [np.array(sentences[x]) for x in winners], [scores[x] for x in winners]
+    return [np.array(sentences[x[0]]) for x in winners], [scores[x[0]] for x in winners], [x[1] for x in winners]
 
 
 def range_vote(votes, weights):
@@ -79,7 +79,7 @@ def reweighted_range_vote(votes, weights, max=1):
                 sums += votes[:, x]
                 discounts = 1 / (1 + sums/max)
                 num_winners += 1
-                yield x
+                yield x, scores[x]
                 break
 
 
