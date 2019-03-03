@@ -8,7 +8,7 @@ sys.path.append("../inference") # go to parent dir
 sys.path.append("../utils") # go to parent dir
 
 from voting import rrv_captions, reweighted_range_vote
-from similarities import unigram_precision, bigram_overlap, bleu_similarity, bigram_precision
+from similarities import unigram_precision, bigram_overlap, bleu_similarity, bigram_precision, unigram_overlap
 from prepare_captions import preprocess_json_files
 import numpy as np
 from scipy.spatial import distance
@@ -34,6 +34,7 @@ def print_image(image_id, image_dir = "../../val2014_2/val2014/"):
     image_path = "{}{}.jpg".format(image_dir, image_id)
     img=mpimg.imread(image_path)
     imgplot = plt.imshow(img)
+    plt.axis("off")
 
 def load_caption(image_id, image_dir="../outputs/beam_captions/"):
     if type(image_id) == str:
@@ -75,37 +76,23 @@ def _load_image_indexes_map(map_file = "../outputs/val_image_id_to_idx.csv"):
     return image_id_to_index, index_to_image_id
 
 def rrv_votes(caption_object, num_winners=5, normalise_votes=False, similarity="unigram"):
-    if similarity == "unigram_multiplicity":
-        return rrv_captions(caption_object['captions'],
-                            caption_object['probabilities'],
-                            num_winners=num_winners,
-                            normalise_votes=normalise_votes,
-                            similarity=unigram_precision)
-    elif similarity == "bleu":
-        return rrv_captions(caption_object['captions'],
-                            caption_object['probabilities'],
-                            num_winners=num_winners,
-                            normalise_votes=normalise_votes,
-                            similarity=bleu_similarity)
-    elif similarity == "bigram_overlap":
-        return rrv_captions(caption_object['captions'],
-                            caption_object['probabilities'],
-                            num_winners=num_winners,
-                            normalise_votes=normalise_votes,
-                            similarity=bigram_overlap)
-    elif similarity == "bigram_precision":
-        return rrv_captions(caption_object['captions'],
-                            caption_object['probabilities'],
-                            num_winners=num_winners,
-                            normalise_votes=normalise_votes,
-                            similarity=bigram_precision)
-    elif similarity == "unigram_precision":
-        return rrv_captions(caption_object['captions'],
-                        caption_object['probabilities'],
-                        num_winners=num_winners,
-                        normalise_votes=normalise_votes)
+    sentences = [caption_object['captions'][i]['sentence'] for i in range(len(caption_object['captions']))]
+    probabilities = caption_object['probabilities']
+#     print("Computing rrv_votes on sentences: {} with probabilities: {}".format(sentences, probabilities))
     
-    raise ValueError("Unkown similarity {}".format(similarity))
+    similarity_methods = {
+        "unigram_multiplicity": unigram_precision,
+        "bleu": bleu_similarity,
+        "bigram_overlap": bigram_overlap,
+        "bigram_precision": bigram_precision,
+        "unigram_overlap": unigram_overlap
+    }
+
+    return rrv_captions(sentences,
+                        probabilities,
+                        num_winners=num_winners,
+                        normalise_votes=normalise_votes,
+                        similarity=similarity_methods[similarity])
 
 
 def rrv_votes_hidden_vector(caption_object, num_winners=5, normalise_votes=False):

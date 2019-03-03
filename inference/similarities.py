@@ -6,6 +6,7 @@ def remove_tags(s):
     :param s: Sentence as a list of words
     :return: Same sentence without the tags
     """
+    # tags = set(['<START>', '<END>', '<UNK>', 0, 1, 2, 3])
     tags = set(['<START>', '<END>', '<UNK>'])
     filtered_words = []
     for word in s:
@@ -22,7 +23,6 @@ def unigram_overlap(s, t):
     :param t: sentence 2 as a list of words
     :return: The unigram precision
     """
-
     s = remove_tags(s)
     t = remove_tags(t)
 
@@ -75,6 +75,9 @@ def bigram_overlap(s, t):
     bigrams_t = list(zip(t[:-1], t[1:]))
 
     bigrams_s = set(bigrams_s)
+    if len(bigrams_s) == 0:
+        return 0
+
     bigrams_t = set(bigrams_t)
 
     overlap = 0
@@ -91,10 +94,15 @@ def bigram_precision(s, t):
     bigrams_s = list(zip(s[:-1], s[1:]))
     bigram_t = list(zip(t[:-1], t[1:]))
 
+    if len(bigrams_s) == 0:
+        return 0
+
     overlap = 0
     for bigram in bigrams_s:
         overlap += 1 if bigram in bigram_t else 0
     return overlap / len(bigrams_s)
+
+
 def bleu_similarity(s, t):
     return compute_bleu([[s]], [t])[0]
 

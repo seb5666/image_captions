@@ -1,21 +1,19 @@
-
 """Predict captions on test images using trained model, with beam search method"""
 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import tensorflow as tf
-
-import configuration
-from ShowAndTellModel import build_model
-from coco_utils import load_coco_data, sample_coco_minibatch, decode_captions
-import numpy as np
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
 
+import numpy as np
+import tensorflow as tf
+
+from model import configuration
+from model.ShowAndTellModel import build_model
 from inference_utils import extract_features, extract_image_id, run_inference
 
 from caption_generator import * 
@@ -26,6 +24,7 @@ training_config = configuration.TrainingConfig()
 FLAGS = None
 verbose = True
 mode = 'inference'
+
 
 def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, batch_size = 16):
     model = build_model(model_config, mode, inference_batch=1)
@@ -81,24 +80,24 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
                 output_file = os.path.join(FLAGS.save_dir, str(image_id) + ".json")
 
                 total_prob = 0
-                scores = []
                 captions = []
+                scores = []
                 for caption in beam_predictions:
                     score = np.exp(caption.score)
+                    scores.append(score)
                     c = {}
-                    c['score'] = score
+                    c['probability'] = score
                     c['sentence'] = caption.sentence
-                    state_history = np.array(caption.state_history)
-                    c['hidden_state_average'] = np.mean(state_history, axis=0).tolist()
+                    # state_history = np.array(caption.state_history)
+                    # c['hidden_state_average'] = np.mean(state_history, axis=0).tolist()
                     total_prob += score
                     captions.append(c)
 
                 beam_captions = {
                     'image_id': image_id,
                     'captions': captions,
-                    'probabilities': scores,
                     'total_prob': total_prob,
-
+                    'probabilities': scores
                 }
 
                 print("Saving to {}".format(output_file))
@@ -113,9 +112,6 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
 
 def main(_):
 
-    # Parameters
-    beam_size = 5
-
     # load dictionary
     data = {}
     with open(FLAGS.dict_file, 'r') as f:
@@ -127,6 +123,7 @@ def main(_):
     print("Loaded dictionary...")
     print("Dictionary size: {}".format(len(data['idx_to_word'])))
 
+    beam_size = FLAGS.beam_size
 
     if FLAGS.load_features:
         features = np.load(os.path.join(FLAGS.test_dir + "features.npy"))
@@ -149,6 +146,11 @@ def main(_):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--beam_size',
+        type=int,
+        help="Beam size to use during language generation"
+    )
     parser.add_argument(
         '--pretrain_dir',
         type=str,
@@ -206,8 +208,8 @@ if __name__ == '__main__':
     parser.add_argument(
         '--load_features',
         type=bool,
-        default=False,
-        help="Set to True if the image features (embeddings) should be loaded from disk"
+        default=True,
+        help="Flag indicating whether to load the image CNN features from disk."
     )
 
     parser.add_argument(

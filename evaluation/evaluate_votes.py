@@ -1,18 +1,18 @@
 import os
 from tqdm import tqdm
 from json import JSONDecodeError
-from utils import load_vocab, load_annotations, load_caption, decode_caption, rrv_votes, rrv_votes_hidden_vector
+from utils import load_vocab, load_annotations, load_caption, decode_caption, rrv_votes, git_hidden_vector
 import pickle
 from nltk.translate import bleu_score
 
-LOAD_CAPTIONS = True
+LOAD_CAPTIONS = False
 
 beam_size = 10
-use_hidden = True
+use_hidden = False
 vocab_file = "/home/spb61/coco2014_vocab.json"
 beam_captions_dir = "/datadrive/val_beam_{}_states/".format(beam_size)
 print("Loading beams from: {}".format(beam_captions_dir))
-save_file = "/home/spb61/image_captions/outputs/vote_captions_{}_hidden.pickle".format(beam_size) # File to save generated votes
+save_file = "/home/spb61/image_captions/outputs/vote_captions_scores_{}_bigram_precision.pickle".format(beam_size) # File to save generated votes
 
 annotations_dir = "/home/spb61/annotations/"
 annotations_file = "captions_val2014.json"
