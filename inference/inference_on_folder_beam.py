@@ -9,6 +9,7 @@ import json
 import os
 import sys
 
+import pickle
 import numpy as np
 import tensorflow as tf
 
@@ -17,6 +18,8 @@ from model.ShowAndTellModel import build_model
 from inference_utils import extract_features, extract_image_id, run_inference
 
 from caption_generator import * 
+
+from scipy.spatial import distance
 
 model_config = configuration.ModelConfig()
 training_config = configuration.TrainingConfig()
@@ -60,7 +63,7 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
                 if FLAGS.starts_with is not None and not str(image_id).startswith(FLAGS.starts_with):
                     continue
 
-                output_file = os.path.join(FLAGS.save_dir, str(image_id) + ".json")
+                output_file = os.path.join(FLAGS.save_dir, str(image_id) + ".pickle")
                 if not os.path.isfile(output_file):
                     features.append(features_batch[i])
                     image_names.append(image_name)
@@ -77,33 +80,36 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
 
             for beam_predictions, image_name in zip(beam_predictions_batch, image_names):
                 image_id = extract_image_id(image_name)
-                output_file = os.path.join(FLAGS.save_dir, str(image_id) + ".json")
+                output_file = os.path.join(FLAGS.save_dir, str(image_id) + ".pickle")
 
                 total_prob = 0
                 captions = []
-                scores = []
+                probabilities = []
+                hidden_states = []
                 for caption in beam_predictions:
                     score = np.exp(caption.score)
-                    scores.append(score)
-                    c = {}
-                    c['probability'] = score
-                    c['sentence'] = caption.sentence
-                    # state_history = np.array(caption.state_history)
-                    # c['hidden_state_average'] = np.mean(state_history, axis=0).tolist()
                     total_prob += score
-                    captions.append(c)
+
+                    probabilities.append(score)
+                    captions.append(caption.sentence)
+                    state_history = np.array(caption.state_history)
+                    mean_hidden_state = np.mean(state_history, axis=0)[1]
+                    hidden_states.append(mean_hidden_state)
+
+                similarity_matrix = [[distance.cosine(p, q) for q in hidden_states] for p in hidden_states]
 
                 beam_captions = {
                     'image_id': image_id,
                     'captions': captions,
                     'total_prob': total_prob,
-                    'probabilities': scores
+                    'probabilities': probabilities,
+                    'similarity_matrix': similarity_matrix
                 }
 
                 print("Saving to {}".format(output_file))
                 # Initialise output file
-                with open(output_file, 'w+') as outfile:
-                    json.dump(beam_captions, outfile)
+                with open(output_file, 'wb') as outfile:
+                    pickle.dump(beam_captions, outfile, pickle.HIGHEST_PROTOCOL )
 
             print("Saved beams for batch {} out {}".format(j + 1, num_batches))
 
