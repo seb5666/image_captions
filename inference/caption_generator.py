@@ -10,7 +10,7 @@ import heapq
 import math
 
 import numpy as np
-
+import tensorflow as tf
 from tensorflow.contrib.seq2seq import BeamSearchDecoder
 
 class Caption(object):
@@ -211,6 +211,176 @@ class CaptionGenerator(object):
             complete_captions.push(beam)
           else:
             beam = Caption(sentence, state, logprob, score, state_history, metadata_list)
+            partial_captions.push(beam)
+      if partial_captions.size() == 0:
+        # We have run out of partial candidates; happens when beam_size = 1.
+        break
+
+    # If we have no complete captions then fall back to the partial captions.
+    # But never output a mixture of complete and partial captions because a
+    # partial caption could have a higher score than all the complete captions.
+    if not complete_captions.size():
+      complete_captions = partial_captions
+
+    return complete_captions.extract(sort=True)
+
+class DiverseBeamCaptionGenerator(object):
+  """Class to generate captions from an image-to-text model.
+
+  This uses the `Diverse Beam Search` procedure as presented
+  by Li et al. in https://arxiv.org/pdf/1601.00372.pdf.
+  """
+
+  def __init__(self,
+               model,
+               vocab,
+               beam_size=3,
+               diversity_rate=0.5,
+               max_caption_length=24,
+               length_normalization_factor=0.0):
+    """Initializes the generator.
+    Args:
+      model: Object encapsulating a trained image-to-text model. Must have
+        methods feed_image() and inference_step(). For example, an instance of
+        InferenceWrapperBase.
+      vocab: A Vocabulary object.
+      beam_size: Beam size to use when generating captions.
+      diversity_rate: `float` indicating the rate at which lower beam generated siblings
+        are penalised
+      max_caption_length: The maximum caption length before stopping the search.
+      length_normalization_factor: If != 0, a number x such that captions are
+        scored by logprob/length^x, rather than logprob. This changes the
+        relative scores of captions depending on their lengths. For example, if
+        x > 0 then longer captions will be favored.
+    """
+    self.vocab = vocab
+    self.model = model
+
+    self.beam_size = beam_size
+    self.diversity_rate = diversity_rate
+    self.max_caption_length = max_caption_length
+    self.length_normalization_factor = length_normalization_factor
+
+  def _feed_image(self, sess, feature):
+    # get initial state using image feature
+    feed_dict = {self.model['image_feature']: feature,
+                 self.model['keep_prob']: 1.0}
+    state = sess.run(self.model['initial_state'], feed_dict=feed_dict)
+    return state
+
+  def _batch_lstm_states(self, states_list):
+    cs = np.concatenate([state.c for state in states_list])
+    hs = np.concatenate([state.h for state in states_list])
+    states_batch = tf.nn.rnn_cell.LSTMStateTuple(c=cs, h=hs)
+    return states_batch
+
+  def _unbatch_lstm_states(self, states_batch):
+    cs = states_batch.c
+    hs = states_batch.h
+
+    states_list = [tf.nn.rnn_cell.LSTMStateTuple(c=cs[i], h=hs[i])
+                   for i in range(len(cs))]
+    return states_list
+
+  def _inference_step(self, sess, input_feed_list, state_feed_list, max_caption_length):
+    mask = np.zeros((1, max_caption_length))
+    mask[:, 0] = 1
+    softmax_outputs = []
+    new_state_outputs = []
+
+    for input, state in zip(input_feed_list, state_feed_list):
+      feed_dict = {self.model['input_seqs']: input,
+                   self.model['initial_state']: state,
+                   self.model['input_mask']: mask,
+                   self.model['keep_prob']: 1.0}
+      softmax, new_state = sess.run([self.model['softmax'], self.model['final_state']], feed_dict=feed_dict)
+      softmax_outputs.append(softmax)
+      new_state_outputs.append(new_state)
+
+    # TODO: BATCH THIS STEP FOR SPEED!
+    # batch_size = len(input_feed_list)
+    # feed_dict2 = {
+    #   # self.model['input_seqs']: np.concatenate(input_feed_list),
+    #   self.model['input_seqs']: np.concatenate(input_feed_list),
+    #   self.model['initial_state']: self._batch_lstm_states(state_feed_list),
+    #   self.model['input_mask']: np.tile(mask, (batch_size, 1)),
+    #   self.model['keep_prob']: np.tile([1.0], (batch_size, 1))
+    # }
+    # import ipdb; ipdb.set_trace()
+    # softmax_outputs2, state_outputs_batch = sess.run(
+    #     [self.model['softmax'], self.model['final_state']],
+    #     feed_dict=feed_dict2
+    # )
+    # new_state_outputs2 = self._unbatch_lstm_states(state_outputs_batch)
+    # import ipdb; ipdb.set_trace()
+    # # assert np.array_equal(softmax_outputs, softmax_outputs2)
+    # # assert np.array_equal(new_state_outputs, new_state_outputs2)
+    # import ipdb; ipdb.set_trace()
+
+    return softmax_outputs, new_state_outputs, None
+
+  def beam_search(self, sess, feature):
+    """Runs beam search caption generation on a single image.
+    Args:
+      sess: TensorFlow Session object.
+      feature: extracted V3 feature of one image.
+    Returns:
+      A list of Caption sorted by descending score.
+    """
+    # Feed in the image to get the initial state.
+    initial_state = self._feed_image(sess, feature)
+
+    initial_beam = Caption(
+      sentence=[self.vocab['<START>']],
+      state=initial_state,
+      logprob=0.0,
+      score=0.0,
+      metadata=[""])
+
+    partial_captions = TopN(self.beam_size)
+    partial_captions.push(initial_beam)
+    complete_captions = TopN(self.beam_size)
+
+    # Run beam search.
+    for _ in range(self.max_caption_length - 1):
+      partial_captions_list = partial_captions.extract()
+      partial_captions.reset()
+      input_feed = [np.array([c.sentence[-1]]).reshape(1, 1) for c in partial_captions_list]
+      state_feed = [c.state for c in partial_captions_list]
+
+      softmax, new_states, metadata = self._inference_step(sess,
+                                                           input_feed,
+                                                           state_feed,
+                                                           self.max_caption_length)
+
+      for i, partial_caption in enumerate(partial_captions_list):
+        word_probabilities = softmax[i][0]
+        state = new_states[i]
+
+        # For this partial caption, get the beam_size most probable next words.
+        words_and_probs = list(enumerate(word_probabilities))
+        words_and_probs.sort(key=lambda x: -x[1])
+        words_and_probs = words_and_probs[0:self.beam_size]
+
+        # Each next word gives a new partial caption.
+        for rank, w_and_p in enumerate(words_and_probs):
+          w, p = w_and_p
+          if p < 1e-12:
+            continue  # Avoid log(0).
+          sentence = partial_caption.sentence + [w]
+          logprob = partial_caption.logprob + math.log(p)
+          score = logprob - self.diversity_rate * (rank + 1)
+          if metadata:
+            metadata_list = partial_caption.metadata + [metadata[i]]
+          else:
+            metadata_list = None
+          if w == self.vocab['<END>']:
+            if self.length_normalization_factor > 0:
+              score /= len(sentence) ** self.length_normalization_factor
+            beam = Caption(sentence, state, logprob, score, metadata=metadata_list)
+            complete_captions.push(beam)
+          else:
+            beam = Caption(sentence, state, logprob, score, metadata=metadata_list)
             partial_captions.push(beam)
       if partial_captions.size() == 0:
         # We have run out of partial candidates; happens when beam_size = 1.

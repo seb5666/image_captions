@@ -17,7 +17,7 @@ from model import configuration
 from model.ShowAndTellModel import build_model
 from inference_utils import extract_features, extract_image_id, run_inference
 
-from caption_generator import * 
+from caption_generator import CaptionGenerator, DiverseBeamCaptionGenerator
 
 from scipy.spatial import distance
 
@@ -32,7 +32,7 @@ mode = 'inference'
 def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, batch_size=16):
     model = build_model(model_config, mode, inference_batch=1)
 
-    generator = CaptionGenerator(
+    generator = DiverseBeamCaptionGenerator(
         model,
         data['word_to_idx'],
         max_caption_length=model_config.padded_length - 1,
@@ -44,12 +44,10 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
     features_batches = [features[i * batch_size : (i+1) * batch_size] for i in range(num_batches)]
     image_names_batches = [image_names[i * batch_size : (i+1) * batch_size] for i in range(num_batches)]
 
-    init = tf.global_variables_initializer()
-
     total_images_processed = 0
 
     with tf.Session() as sess:
-        sess.run(init)
+        sess.run(tf.global_variables_initializer())
         model['saver'].restore(sess, saved_sess)
 
         for j, (features_batch, image_names_batch) in enumerate(zip(features_batches, image_names_batches)):
@@ -85,7 +83,7 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
                 total_prob = 0
                 captions = []
                 probabilities = []
-                hidden_states = []
+                # hidden_states = []
                 for caption in beam_predictions:
                     score = np.exp(caption.score)
                     total_prob += score
@@ -93,17 +91,17 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
                     probabilities.append(score)
                     captions.append(caption.sentence)
                     state_history = np.array(caption.state_history)
-                    mean_hidden_state = np.mean(state_history, axis=0)[1]
-                    hidden_states.append(mean_hidden_state)
+                    # mean_hidden_state = np.mean(state_history, axis=0)[1]
+                    # hidden_states.append(mean_hidden_state)
 
-                similarity_matrix = [[distance.cosine(p, q) for q in hidden_states] for p in hidden_states]
+                # similarity_matrix = [[distance.cosine(p, q) for q in hidden_states] for p in hidden_states]
 
                 beam_captions = {
                     'image_id': image_id,
                     'captions': captions,
                     'total_prob': total_prob,
                     'probabilities': probabilities,
-                    'similarity_matrix': similarity_matrix
+                    # 'similarity_matrix': similarity_matrix
                 }
 
                 print("Saving to {}".format(output_file))
@@ -118,6 +116,7 @@ def save_beam_captions(features, image_names, data, saved_sess, beam_size=3, bat
 
 def main(_):
 
+    print("RUNNING DIVERSE BEAM DECODING.")
     # load dictionary
     data = {}
     with open(FLAGS.dict_file, 'r') as f:
