@@ -235,7 +235,7 @@ class DiverseBeamCaptionGenerator(object):
                model,
                vocab,
                beam_size=3,
-               diversity_rate=0.5,
+               diversity_rate=0.1,
                max_caption_length=24,
                length_normalization_factor=0.0):
     """Initializes the generator.
